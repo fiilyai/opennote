@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 本地 Pi 状态（不进仓库）
+.pi/
+
+# 用户运行时数据（在 ~/.opennote/，但若有人误把它放进项目根，忽略掉）
+.opennote/
+
+# 公号文章源文（独立演化，不进 git 历史）
+content/
+
+# 个人化本地配置（如果你想另开一份覆盖默认 opennote.yaml）
+opennote.local.yaml
+**/opennote.local.yaml

@@ -1,0 +1,154 @@
+# opennote
+
+> 用微信收链接，本地织笔记，攒够素材自动出专题文章。
+> 一个真能跑的 AI agent，底座是 [Pi](https://github.com/earendil-works/pi)（OpenClaw 同款）。
+
+---
+
+## 一分钟跑通
+
+需要 Node.js 20+ 和 pnpm。
+
+- 没装 Node.js：去 [nodejs.org](https://nodejs.org/) 下个 LTS 版（一路 Next），或者 `brew install node`（macOS）
+- 没装 pnpm：装好 Node.js 后跑 `npm install -g pnpm`，或参考 [pnpm.io/installation](https://pnpm.io/installation)
+
+然后：
+
+```bash
+git clone <repo-url> opennote
+cd opennote
+pnpm install
+pnpm dev
+```
+
+回车，直接进入对话：
+
+```
+opennote v0.0.1
+model:  kimi-for-coding
+config: ./opennote.yaml
+输入消息开始对话，输入 /exit 或 quit 退出。
+
+> 你好，介绍一下你自己
+你好，我是 opennote，一个帮你快速记录、整理和回顾想法的 AI 笔记助手。
+
+>
+```
+
+仓库默认接的是 KIMI Coding 端点，**内置一个公开测试 key**，你不配任何东西就能跑。
+
+> ⚠️ 测试 key 是公共资源，请勿滥用 / 勿用于生产。
+> 自己实际使用时，请去 [kimi.com](https://www.kimi.com/) 申请一个自己的 key，
+> 编辑 `opennote.yaml` 里的 `agent.apiKey` 字段换上。
+
+---
+
+## 自定义
+
+所有配置都在项目根的 `opennote.yaml`，字段都带中文注释。
+
+最常改的三件事：
+
+**换 model / provider**
+
+```yaml
+agent:
+  model: anthropic:claude-sonnet-4-20250514   # 或 openai:gpt-5 / google:gemini-2.5-pro / deepseek:deepseek-chat
+  # 删掉 baseUrl / headers 两段，让 pi-ai 走内置 provider
+```
+
+**换 API key**
+
+```yaml
+agent:
+  apiKey: "sk-你自己的-key"          # 或：
+  apiKeyEnv: ANTHROPIC_API_KEY      # 从环境变量读
+```
+
+**换 system prompt**
+
+```yaml
+agent:
+  systemPrompt: |
+    你是 ...
+```
+
+完整字段说明在 `opennote.yaml` 文件内。
+
+---
+
+## 命令
+
+opennote 走 `opennote COMMAND [option]` 风格。Day 0 只有 `chat`，后面逐天加。
+
+| 命令 | 作用 | 上线 |
+|---|---|---|
+| `opennote chat`（默认）| 进对话 | Day 0 |
+| `opennote run "<prompt>"` | 单次执行，stdout 出结果 | Day 8 |
+| `opennote serve` | 起微信长轮询，让 agent 在微信里收发 | Day 5 |
+| `opennote login` | 微信扫码登录 | Day 5 |
+| `opennote tidy` | 整理今天的笔记（cron 用） | Day 8 |
+| `opennote --version` | 版本号 | Day 0 |
+| `opennote --help` | 命令帮助 | Day 0 |
+
+---
+
+## 配套教程
+
+这是「**10 天学会 AI Agent 开发**」系列教程的配套代码仓库。
+
+从 Day 0（你看到的这版）开始，每天加一块，到 Day 10 完整跑通：微信收链接 → 本地织笔记 → 出专题 → 发到外部。
+
+每篇文章首发微信公众号，扫码关注：
+
+<img src="./assets/wechat.jpg" alt="公众号二维码" width="200">
+
+代码用 git tag 标记每天结束时的完整状态：
+
+```bash
+git checkout day-3              # 切到 Day 3 结束时的代码
+git diff day-2 day-3 -- src/    # 看 Day 2 → Day 3 改了什么
+```
+
+11 个 tag（`day-0` 到 `day-10`），打上不动，方便 diff 阅读。
+
+---
+
+## 进阶（开发者）
+
+```bash
+pnpm typecheck     # 跑 tsc 类型检查
+pnpm build         # 编译到 dist/
+pnpm chat          # 跟 pnpm dev 一样
+
+# Debug 流式事件 / HTTP payload
+OPENNOTE_DEBUG_EVENTS=1 pnpm dev
+OPENNOTE_DEBUG_HTTP=1 pnpm dev
+```
+
+代码结构：
+
+```
+opennote/
+├── bin/opennote.ts        ← CLI 入口（launcher）
+├── src/
+│   ├── cli.ts             ← commander 派发子命令
+│   ├── config.ts          ← opennote.yaml 加载 + 校验
+│   ├── agent/create.ts    ← 把配置组装成 Pi Agent
+│   └── commands/chat.ts   ← interactive REPL
+├── opennote.yaml          ← 配置（含测试 key，可改 / 可换）
+└── README.md
+```
+
+依赖的 4 个 Pi 包都是 SDK 嵌入用：
+
+- `@earendil-works/pi-agent-core`：Agent runtime、tool loop、事件流
+- `@earendil-works/pi-ai`：30+ provider 的 LLM 抽象
+- `@earendil-works/pi-coding-agent`：CLI / TUI 资产复用
+- `@earendil-works/pi-tui`：TUI 库（Day 0 暂未启用）
+
+---
+
+## License
+
+MIT
