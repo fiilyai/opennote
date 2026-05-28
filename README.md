@@ -120,11 +120,38 @@ git diff day-2 day-3 -- src/    # 看 Day 2 → Day 3 改了什么
 pnpm typecheck     # 跑 tsc 类型检查
 pnpm build         # 编译到 dist/
 pnpm chat          # 跟 pnpm dev 一样
-
-# Debug 流式事件 / HTTP payload
-OPENNOTE_DEBUG_EVENTS=1 pnpm dev
-OPENNOTE_DEBUG_HTTP=1 pnpm dev
 ```
+
+### Debug 模式
+
+LLM 选错 tool / 写错路径 / 凭空编造结果？开 debug 看实际发生了什么。
+
+```bash
+# 一键全开（推荐用这个）
+OPENNOTE_DEBUG=1 pnpm dev
+
+# 或者按需开任一
+OPENNOTE_DEBUG_HTTP=1 pnpm dev      # 只 dump LLM 请求 / 回复
+OPENNOTE_DEBUG_EVENTS=1 pnpm dev    # 只 dump agent 事件流
+
+# 自定义输出目录（默认 ~/.opennote/debug/{ISO 时间戳}/）
+OPENNOTE_DEBUG_DIR=./debug-2026-05-28 pnpm dev
+```
+
+输出文件（每个 turn 一对，按编号配对阅读）：
+
+| 文件 | 内容 |
+|---|---|
+| `NNN-payload.json` | 这一轮**发给 LLM 的完整请求**：systemPrompt + messages + 所有 tool 的 description / schema |
+| `NNN-assistant.json` | 这一轮 LLM **返回的 assistant message**：text + 它决定要调的 tool 名字 + 实参 |
+| `events.jsonl`（仅 EVENTS 开时）| 所有 agent 事件原样追加，一行一条。包含 tool 执行细节、流式 chunk 等 |
+
+诊断流程：
+
+- LLM 没调你期望的 tool → 看 `NNN-payload.json` 里那个 tool 的 description，写得清不清楚
+- LLM 调了 tool 但参数偏 → 看 `NNN-assistant.json` 里 `arguments`，对照 systemPrompt 的约定
+- 想知道 tool 实际收到啥参数 / 返回啥 → grep `events.jsonl` 里 `tool_execution_start` / `tool_execution_end`
+- 想看 LLM 思考过程（如果模型支持）→ `NNN-assistant.json` 里有 `thinking` content block
 
 代码结构：
 

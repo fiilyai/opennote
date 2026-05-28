@@ -9,7 +9,7 @@
 
 import path from "node:path";
 import { homedir } from "node:os";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 
 import { Agent } from "@earendil-works/pi-agent-core";
 import { getModel, getProviders } from "@earendil-works/pi-ai";
@@ -100,23 +100,46 @@ export function createOpennoteAgent(config: OpennoteConfig): Agent {
     model = getModel(provider, modelName as never);
   }
 
+  // 调试模式见 README 的「Debug 模式」一节。
+  // OPENNOTE_DEBUG=1 一键开启所有 dump（payload + assistant 解析后内容 + events）
+  // 或者按需开 OPENNOTE_DEBUG_HTTP / OPENNOTE_DEBUG_EVENTS 任一
+  const debug = !!(
+    process.env.OPENNOTE_DEBUG ||
+    process.env.OPENNOTE_DEBUG_HTTP ||
+    process.env.OPENNOTE_DEBUG_EVENTS
+  );
+  const debugHttp = !!(process.env.OPENNOTE_DEBUG || process.env.OPENNOTE_DEBUG_HTTP);
+  const debugEvents = !!(process.env.OPENNOTE_DEBUG || process.env.OPENNOTE_DEBUG_EVENTS);
+  const debugDir = debug ? prepareDebugDir(process.env.OPENNOTE_DEBUG_DIR) : undefined;
+
   const agent = new Agent({
     initialState: {
       systemPrompt: config.agent.systemPrompt,
       model,
     },
     getApiKey: makeApiKeyResolver(config),
-    onPayload: process.env.OPENNOTE_DEBUG_HTTP
+    onPayload: debugHttp
       ? (payload: unknown) => {
-          console.error("[payload]", JSON.stringify(payload).slice(0, 600));
+          dumpDebug(debugDir!, "payload", payload);
         }
       : undefined,
-    onResponse: process.env.OPENNOTE_DEBUG_HTTP
-      ? (response: unknown) => {
-          console.error("[response]", JSON.stringify(response).slice(0, 600));
-        }
-      : undefined,
+    // onResponse 在 streaming 模式下只能拿到 HTTP metadata（status + headers），
+    // 不含 body。要看 LLM 实际输出，监听 message_end 事件（见下面 subscribe）。
   });
+
+  if (debugHttp) {
+    agent.subscribe((event) => {
+      // message_end 对 user / assistant / tool_result 都 fire；只 dump assistant
+      if (event.type === "message_end" && event.message?.role === "assistant") {
+        dumpDebug(debugDir!, "assistant", event.message);
+      }
+    });
+  }
+  if (debugEvents) {
+    agent.subscribe((event) => {
+      dumpDebug(debugDir!, "event", event);
+    });
+  }
 
   // cwd = 笔记目录。pi 自带的 read/write/edit 把相对路径解析为 cwd 之下，
   // 所以 LLM 说「写到 today.md」会落到 ~/.opennote/notes/today.md。
@@ -141,6 +164,60 @@ function expandPath(p: string): string {
   if (p === "~") return homedir();
   if (p.startsWith("~/")) return path.join(homedir(), p.slice(2));
   return p;
+}
+
+/**
+ * 准备 debug 输出目录。
+ * 默认 ~/.opennote/debug/{ISO 时间戳}/，给本次进程独立目录。
+ * 用户可以 OPENNOTE_DEBUG_DIR=自定义路径 强制走指定目录。
+ */
+function prepareDebugDir(override?: string): string {
+  const dir = override
+    ? expandPath(override)
+    : path.join(
+        homedir(),
+        ".opennote",
+        "debug",
+        new Date().toISOString().replace(/[:.]/g, "-"),
+      );
+  mkdirSync(dir, { recursive: true });
+  console.error(`[opennote-debug] writing to ${dir}`);
+  return dir;
+}
+
+let payloadCounter = 0;
+let assistantCounter = 0;
+
+/**
+ * dump 一条 debug 数据。kind 决定文件格式：
+ *   - "payload"   → NNN-payload.json，每个 turn 发给 LLM 的完整请求
+ *   - "assistant" → NNN-assistant.json，每个 turn LLM 返回的完整 assistant message
+ *                    （text + tool calls 解析后的形态）
+ *   - "event"     → 追加到 events.jsonl，每行一个 agent 事件
+ */
+function dumpDebug(
+  dir: string,
+  kind: "payload" | "assistant" | "event",
+  data: unknown,
+): void {
+  if (kind === "payload") {
+    payloadCounter += 1;
+    const file = path.join(
+      dir,
+      `${String(payloadCounter).padStart(3, "0")}-payload.json`,
+    );
+    writeFileSync(file, JSON.stringify(data, null, 2));
+  } else if (kind === "assistant") {
+    assistantCounter += 1;
+    const file = path.join(
+      dir,
+      `${String(assistantCounter).padStart(3, "0")}-assistant.json`,
+    );
+    writeFileSync(file, JSON.stringify(data, null, 2));
+  } else {
+    const file = path.join(dir, "events.jsonl");
+    appendFileSync(file, JSON.stringify(data) + "\n");
+  }
 }
 
 /**
