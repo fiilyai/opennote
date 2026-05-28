@@ -2,15 +2,27 @@
  * 把 opennote 配置组装成一个 Pi Agent。
  *
  * Day 0：只配 systemPrompt + model
- * Day 1+ ：在这里 register tools（fetch_url / save_note / ...）
- * Day 5+ ：挂 extensions（weixin / cron / 等）
+ * Day 1：装 5 个 tool —— fetch_content / open_path / read / write / edit
+ *        其中 read/write/edit 复用 pi-coding-agent 自带的实现（Claude Code 同款）
+ * Day 5+：挂 extensions（weixin / cron / 等）
  */
+
+import path from "node:path";
+import { homedir } from "node:os";
+import { mkdirSync } from "node:fs";
 
 import { Agent } from "@earendil-works/pi-agent-core";
 import { getModel, getProviders } from "@earendil-works/pi-ai";
 import type { KnownProvider, Model } from "@earendil-works/pi-ai";
+import {
+  createReadTool,
+  createWriteTool,
+  createEditTool,
+} from "@earendil-works/pi-coding-agent";
 
 import type { OpennoteConfig } from "../config.js";
+import { createFetchContentTool } from "../tools/fetch_content.js";
+import { createOpenPathTool } from "../tools/open_path.js";
 
 interface ParsedKnownModel {
   provider: KnownProvider;
@@ -88,7 +100,7 @@ export function createOpennoteAgent(config: OpennoteConfig): Agent {
     model = getModel(provider, modelName as never);
   }
 
-  return new Agent({
+  const agent = new Agent({
     initialState: {
       systemPrompt: config.agent.systemPrompt,
       model,
@@ -105,6 +117,30 @@ export function createOpennoteAgent(config: OpennoteConfig): Agent {
         }
       : undefined,
   });
+
+  // cwd = 笔记目录。pi 自带的 read/write/edit 把相对路径解析为 cwd 之下，
+  // 所以 LLM 说「写到 today.md」会落到 ~/.opennote/notes/today.md。
+  // 用户写绝对路径仍能跳出 cwd（Day 1 不做强制 sandbox，靠 system prompt 引导）。
+  const notesDir = expandPath(config.paths?.notes ?? "~/.opennote/notes");
+  mkdirSync(notesDir, { recursive: true });
+
+  // 注册 tools。每加一个 tool 都加到这个数组里。
+  // tool 设计指南见 docs/tool-development.md。
+  agent.state.tools = [
+    createFetchContentTool(),
+    createOpenPathTool(notesDir),
+    createReadTool(notesDir),
+    createWriteTool(notesDir),
+    createEditTool(notesDir),
+  ];
+
+  return agent;
+}
+
+function expandPath(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return path.join(homedir(), p.slice(2));
+  return p;
 }
 
 /**
