@@ -12,6 +12,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+
+import { expandPath } from "./utils/paths.js";
 import { z } from "zod";
 
 const DEFAULT_MODEL = "anthropic:claude-sonnet-4-20250514";
@@ -43,6 +45,10 @@ const ConfigSchema = z.object({
     })
     .optional(),
   skills: z.array(z.string()).optional(),
+  // 是否扫描用户全局的 ~/.agents/skills/（Agent Skills 跨客户端共享目录）。
+  // 默认 false：opennote 是专注的笔记 agent，不继承你整台机器装的跨客户端 skill，
+  // 避免无关 skill 污染选择（详见 docs/skill-development.md）。
+  globalAgentSkills: z.boolean().optional(),
   extensions: z.array(z.string()).optional(),
   weixin: z
     .object({
@@ -67,15 +73,12 @@ export interface OpennoteConfig {
     state: string;
   };
   skills: string[];
+  globalAgentSkills: boolean;
   extensions: string[];
   weixin: {
     enabled: boolean;
   };
   sourceFile?: string;
-}
-
-function expandHome(p: string): string {
-  return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
 }
 
 function findConfigFile(explicitPath?: string): string | undefined {
@@ -114,11 +117,12 @@ export function loadConfig(explicitPath?: string): OpennoteConfig {
       headers: parsed.agent?.headers,
     },
     paths: {
-      notes: expandHome(parsed.paths?.notes ?? "~/.opennote/notes"),
-      proposals: expandHome(parsed.paths?.proposals ?? "~/.opennote/proposals"),
-      state: expandHome(parsed.paths?.state ?? "~/.opennote/state"),
+      notes: expandPath(parsed.paths?.notes ?? "~/.opennote/notes"),
+      proposals: expandPath(parsed.paths?.proposals ?? "~/.opennote/proposals"),
+      state: expandPath(parsed.paths?.state ?? "~/.opennote/state"),
     },
     skills: parsed.skills ?? [],
+    globalAgentSkills: parsed.globalAgentSkills ?? false,
     extensions: parsed.extensions ?? [],
     weixin: {
       enabled: parsed.weixin?.enabled ?? false,

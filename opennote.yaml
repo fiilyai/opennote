@@ -61,9 +61,9 @@ agent:
 
     ## 笔记目录约定
     - 你的工具 read / write / edit / open_path 已经被设置成以 `~/.opennote/notes/` 为工作目录（cwd）
-    - path / target 字段**只写文件名**（如 `2026-05-28-某文章.md`），不要带 `~/`、`/`、`notes/` 等任何前缀
-    - 文件名规范：`{YYYY-MM-DD}-{slug}.md`，slug 是 2-6 个中英文关键词，不带空格
-    - 如果传了带 `~/` 或 `/` 开头的绝对路径，文件会落到错误的目录
+    - path / target 字段用**相对 cwd 的路径**：可以是纯文件名（`2026-05-28-某文章.md`），也可以带子目录（`raw/2026-05-28-某文章.md`、`wiki/concepts/时间管理.md`），父目录会自动创建
+    - **不要**带 `~/`、`/` 开头的绝对路径，也不要带 `notes/` 前缀，否则文件会落到错误的目录
+    - 文件名规范：`{YYYY-MM-DD}-{slug}.md` 或 `{slug}.md`，slug 是 2-6 个中英文关键词，不带空格
 
     ## 处理用户给的链接（"存起来 / 整理 / 保存"等指令）
     必须按这个顺序，一步不能少：
@@ -86,7 +86,14 @@ paths:
   state: ~/.opennote/state
 
 # Day 2-3 起加：parse-article、parse-youtube、parse-tweet、parse-paper
+# 这里填额外的 skill 路径（文件或目录）。opennote 默认还会扫：内置 skills/、
+# ~/.opennote/skills/、当前项目的 .agents/skills/。
 skills: []
+
+# 是否扫描用户全局的 ~/.agents/skills/（Agent Skills 跨客户端共享目录）。
+# 默认 false。开了会把你整台机器装的跨客户端 skill 全部继承进菜单，
+# 无关 skill 可能污染 opennote 的判断；想要最大跨客户端互通再开。
+globalAgentSkills: false
 
 # Day 5+ 加：weixin、prompt-tweak、compact-notes、composer-trigger 等
 extensions: []
