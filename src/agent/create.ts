@@ -19,6 +19,7 @@ import {
   createReadTool,
   createWriteTool,
   createEditTool,
+  createBashTool,
 } from "@earendil-works/pi-coding-agent";
 
 import type { OpennoteConfig } from "../config.js";
@@ -51,12 +52,16 @@ export function createOpennoteAgent(config: OpennoteConfig): Agent {
   ensureWikiScaffold(notesDir);
 
   // 注册 tools。每加一个 tool 都加到这个数组里。设计指南见 docs/tool-development.md。
+  // Day 3：加 bash —— 复用 pi-coding-agent 自带实现（同 read/write/edit）。
+  //   它让 skill 可以带「可执行脚本」（如 parse-bilibili 调外部 API），是 skill
+  //   从「纯文字策略」升级到「能干活」的关键能力层。cwd 同笔记目录。
   agent.state.tools = [
-    createFetchContentTool(),
+    createFetchContentTool(notesDir),
     createOpenPathTool(notesDir),
     createReadTool(notesDir),
     createWriteTool(notesDir),
     createEditTool(notesDir),
+    createBashTool(notesDir),
   ];
 
   return agent;
