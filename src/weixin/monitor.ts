@@ -136,7 +136,9 @@ export async function runMonitor(opts: MonitorOpts): Promise<void> {
         log(`[weixin] ← ${inbound.from}: ${inbound.body.slice(0, 50)}`);
         let reply: string;
         try {
-          reply = await runAgentOnce(agent, inbound.body);
+          reply = await runAgentOnce(agent, inbound.body, {
+            abortSignal: opts.abortSignal,
+          });
         } catch (err) {
           reply = `处理出错：${err instanceof Error ? err.message : String(err)}`;
         }
