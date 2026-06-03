@@ -7,6 +7,8 @@
 
 import { Command } from "commander";
 import { runChat } from "./commands/chat.js";
+import { runLogin } from "./commands/login.js";
+import { runServe } from "./commands/serve.js";
 
 const VERSION = "0.0.1";
 
@@ -26,9 +28,22 @@ export async function run(argv: string[]): Promise<void> {
       await runChat({ configPath: options.config });
     });
 
-  // 后续 Day 5 加：
-  //   program.command("serve")  →  起 weixin 长轮询
-  //   program.command("login")  →  扫码登录
+  program
+    .command("login")
+    .description("微信扫码登录（存 token 到 ~/.opennote/weixin/）")
+    .option("-c, --config <path>", "指定 opennote.yaml 路径")
+    .action(async (options: { config?: string }) => {
+      await runLogin({ configPath: options.config });
+    });
+
+  program
+    .command("serve")
+    .description("起微信长轮询，把消息驱动到 agent（需先 login + 配 allowFrom）")
+    .option("-c, --config <path>", "指定 opennote.yaml 路径")
+    .action(async (options: { config?: string }) => {
+      await runServe({ configPath: options.config });
+    });
+
   // 后续 Day 8 加：
   //   program.command("run <prompt>") →  单次执行
   //   program.command("tidy")  →  cron 整理

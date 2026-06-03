@@ -34,7 +34,7 @@ agent:
   # 用于接：KIMI Coding、本地 vLLM、Ollama、第三方网关等。
   #
   baseUrl: https://api.kimi.com/coding/v1
-  api: openai-completions           # 默认值，可省略
+  api: openai-completions # 默认值，可省略
 
   # 自定义 HTTP headers（可选）。某些端点（KIMI Coding 等）按 User-Agent 白名单放行。
   # 写法（注意 yaml 缩进）：
@@ -99,5 +99,13 @@ globalAgentSkills: false
 extensions: []
 
 # Day 5 启用。Day 0 关着没事。
+#   1. opennote login 扫码（token 存 ~/.opennote/weixin/，不进这里、不进 git）
+#   2. 把登录回显的 ilink_user_id 填进 allowFrom
+#   3. opennote serve 起长轮询
 weixin:
   enabled: false
+  # baseUrl: https://ilinkai.weixin.qq.com   # 可选，默认即此
+  # 白名单：只有这些 ilink_user_id 能驱动 agent。空 = 谁都不行（安全默认，必须显式配）。
+  # login 成功会把你的 id 自动写进下面。真实 id 是个人配置，别提交进 git。
+  allowFrom: []
+  #   - your-ilink-user-id

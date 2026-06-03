@@ -8,10 +8,10 @@
  *   4. 全部缺失 → 用内置默认（不报错）
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { dirname, join, resolve } from "node:path";
+import { parse as parseYaml, parseDocument } from "yaml";
 
 import { expandPath } from "./utils/paths.js";
 import { z } from "zod";
@@ -53,6 +53,10 @@ const ConfigSchema = z.object({
   weixin: z
     .object({
       enabled: z.boolean().optional(),
+      // iLink 服务地址，默认 https://ilinkai.weixin.qq.com（DEFAULT_BASE_URL）。
+      baseUrl: z.string().optional(),
+      // 白名单：只有这些 ilink_user_id 能驱动 agent。空 = 谁都不行（安全默认）。
+      allowFrom: z.array(z.string()).optional(),
     })
     .optional(),
 });
@@ -77,6 +81,8 @@ export interface OpennoteConfig {
   extensions: string[];
   weixin: {
     enabled: boolean;
+    baseUrl?: string;
+    allowFrom: string[];
   };
   sourceFile?: string;
 }
@@ -126,7 +132,41 @@ export function loadConfig(explicitPath?: string): OpennoteConfig {
     extensions: parsed.extensions ?? [],
     weixin: {
       enabled: parsed.weixin?.enabled ?? false,
+      baseUrl: parsed.weixin?.baseUrl,
+      allowFrom: parsed.weixin?.allowFrom ?? [],
     },
     sourceFile: file,
   };
+}
+
+/**
+ * 决定 allowFrom 写回哪个文件：有加载到的配置文件就写它；没有就写用户级
+ * ~/.opennote/opennote.yaml（不污染项目库，也不需要项目里先有配置）。
+ */
+export function resolveWritableConfigPath(config: OpennoteConfig): string {
+  return config.sourceFile ?? join(homedir(), ".opennote", "opennote.yaml");
+}
+
+/**
+ * 把一个 ilink_user_id 写进 opennote.yaml 的 weixin.allowFrom（顺手把 enabled 置 true）。
+ * 用 yaml Document API 做，保留原文件注释与结构；已存在则跳过（幂等）。
+ * 返回是否真的新增了。
+ */
+export function addWeixinAllowFrom(targetPath: string, userId: string): "added" | "exists" {
+  const text = existsSync(targetPath) ? readFileSync(targetPath, "utf8") : "";
+  const doc = parseDocument(text);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data = (doc.toJSON() as any) ?? {};
+  const existing: string[] = data?.weixin?.allowFrom ?? [];
+  if (existing.includes(userId)) return "exists";
+
+  if (!doc.hasIn(["weixin"])) doc.setIn(["weixin"], { enabled: true, allowFrom: [] });
+  if (doc.getIn(["weixin", "allowFrom"]) == null) doc.setIn(["weixin", "allowFrom"], []);
+  if (doc.getIn(["weixin", "enabled"]) !== true) doc.setIn(["weixin", "enabled"], true);
+  doc.addIn(["weixin", "allowFrom"], userId);
+
+  mkdirSync(dirname(targetPath), { recursive: true });
+  writeFileSync(targetPath, doc.toString(), "utf8");
+  return "added";
 }
