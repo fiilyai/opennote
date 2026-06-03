@@ -1,12 +1,12 @@
 /**
- * open_path tool
+ * open tool
  *
- * 用系统默认应用打开 URL 或者本地文件。
+ * 用系统默认应用打开任意目标——URL 或本地文件。
  *
  * - URL（http/https）→ 系统默认浏览器
  * - 文件路径 → 系统默认应用（.pdf → 预览、.png → 图片查看、.md → 默认 markdown viewer 等）
  *
- * 仅触发打开动作，不返回内容。要拿网页内容请用 `fetch_content`、要读本地文件用 `read`。
+ * 仅触发打开动作，不返回内容。要拿网页内容请用 `browser`、要读本地文件用 `read`。
  *
  * 路径解析：跟 read / write / edit 一样，相对路径会按 cwd 解析（默认 `~/.opennote/notes/`）。
  */
@@ -25,9 +25,9 @@ const schema = Type.Object({
   }),
 });
 
-export type OpenPathInput = Static<typeof schema>;
+export type OpenInput = Static<typeof schema>;
 
-export interface OpenPathDetails {
+export interface OpenDetails {
   target: string;
   resolved: string;
   kind: "url" | "file";
@@ -46,15 +46,15 @@ function resolveLocalPath(target: string, cwd: string): string {
   return path.resolve(cwd, expanded);
 }
 
-export function createOpenPathTool(cwd: string): AgentTool<typeof schema> {
+export function createOpenTool(cwd: string): AgentTool<typeof schema> {
   return {
-    name: "open_path",
+    name: "open",
     label: "用默认应用打开",
     description:
       "用系统默认应用打开一个 URL 或本地文件。" +
       "URL（http/https）会在默认浏览器里弹出；本地文件会用系统默认应用打开（PDF→预览、图片→图片查看、markdown→默认 viewer）。" +
       "本地路径支持：绝对路径、`~/` 开头的 home 路径、或者相对路径（按 cwd 解析，cwd 跟 read/write/edit 一致）。" +
-      "只触发打开动作，不抓内容、不返回正文。要读 URL 内容用 fetch_content；要读本地文件内容用 read。",
+      "只触发打开动作，不抓内容、不返回正文。要读 URL 内容用 browser；要读本地文件内容用 read。",
     parameters: schema,
     async execute(_toolCallId, { target }, signal) {
       if (signal?.aborted) throw new Error("Operation aborted");

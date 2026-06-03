@@ -1,6 +1,6 @@
 # Wiki Schema
 
-collect-content 建页时的详细格式和命名规则。建 概念/实体/synthesis 页或更新索引前读这份。
+wiki-ingest 建页时的详细格式和命名规则。建 概念/实体/synthesis 页或更新索引前读这份。
 
 ## 命名与 slug
 
@@ -19,7 +19,7 @@ collect-content 建页时的详细格式和命名规则。建 概念/实体/synt
 <!-- collected: <YYYY-MM-DD> -->
 <!-- title: <原标题> -->
 
-<fetch_content 抓回来的完整 markdown 正文，原样保留>
+<extract 抽回来的完整 markdown 正文，原样保留>
 ```
 
 存进去就不再改。要修订认识去改 wiki 页。

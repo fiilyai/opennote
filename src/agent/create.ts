@@ -9,6 +9,9 @@
  * Day 1：装 5 个 tool —— fetch_content / open_path / read / write / edit
  *        其中 read/write/edit 复用 pi-coding-agent 自带的实现（Claude Code 同款）
  * Day 2：加载 skills + 初始化 wiki 笔记库
+ * Day 3：加 bash —— skill 从此能带可执行脚本干活
+ * Day 4：fetch_content 拆成通用 browser tool（只拿渲染后 HTML）+ skill 里的
+ *        extract.mjs 脚本（抽正文转 markdown）。职责单一、可复用，HTML 不进上下文。
  * Day 5+：挂 extensions（weixin / cron / 等）
  */
 
@@ -23,8 +26,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { OpennoteConfig } from "../config.js";
-import { createFetchContentTool } from "../tools/fetch_content.js";
-import { createOpenPathTool } from "../tools/open_path.js";
+import { createBrowserTool } from "../tools/browser.js";
+import { createOpenTool } from "../tools/open.js";
 import { ensureWikiScaffold } from "../notes/scaffold.js";
 import { expandPath } from "../utils/paths.js";
 import { resolveModel, makeApiKeyResolver } from "./model.js";
@@ -52,12 +55,13 @@ export function createOpennoteAgent(config: OpennoteConfig): Agent {
   ensureWikiScaffold(notesDir);
 
   // 注册 tools。每加一个 tool 都加到这个数组里。设计指南见 docs/tool-development.md。
-  // Day 3：加 bash —— 复用 pi-coding-agent 自带实现（同 read/write/edit）。
-  //   它让 skill 可以带「可执行脚本」（如 parse-bilibili 调外部 API），是 skill
-  //   从「纯文字策略」升级到「能干活」的关键能力层。cwd 同笔记目录。
+  //   browser —— 通用 CDP 浏览器原语，URL → 渲染后 HTML（Day 4 从 fetch_content 拆出）。
+  //   bash    —— Day 3 加，复用 pi-coding-agent 自带实现（同 read/write/edit）。
+  //              让 skill 能带「可执行脚本」（parse-bilibili 调 API、wiki-ingest 抽正文）。
+  // 都以笔记目录为 cwd。
   agent.state.tools = [
-    createFetchContentTool(notesDir),
-    createOpenPathTool(notesDir),
+    createBrowserTool(notesDir),
+    createOpenTool(notesDir),
     createReadTool(notesDir),
     createWriteTool(notesDir),
     createEditTool(notesDir),

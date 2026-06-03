@@ -1,5 +1,5 @@
 /**
- * 复现 Danny 报的 bug：LLM 调了 fetch_content 但没 chain 调 write，
+ * 复现 Danny 报的 bug：LLM 调了 browser（Day 4 前叫 fetch_content）但没 chain 调 write，
  * 还谎称"已存入"。
  *
  * 跑法：pnpm tsx scripts/test-day1-repro.ts

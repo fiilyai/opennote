@@ -1,7 +1,8 @@
 /**
- * fetch_content tool
+ * browser tool
  *
- * URL → 干净 markdown 正文。
+ * 通用的「建立 CDP / 拿渲染后页面」的浏览器原语。职责单一：URL → 渲染后 HTML。
+ * 不做正文抽取（那是 wiki-ingest skill 里 extract.mjs 脚本的活），保持通用、可复用。
  *
  * 两条抓取路径，浏览器优先、HTTP 兜底：
  *   A. 浏览器（默认）：用 chrome-launcher 起系统已装的 Chromium 系浏览器，
@@ -9,17 +10,18 @@
  *      已经开着浏览器就复用、只开个新 tab；没开才启动。抓完不关，留着复用。
  *   B. HTTP 兜底：浏览器起不来 / 端口连不上时，直接 fetch 原始 HTML。
  *      公众号、博客这类服务端渲染的页面，纯 HTTP 就够了。
- *   两条路抓到 HTML 后，都走同一套 readability + turndown 提正文转 markdown。
+ *
+ * 为什么是 tool 不是脚本：Chrome 实例是有状态的——第一次启动后缓存复用，多次抓取共用
+ * 一个窗口、每次新开 tab。脚本每次冷启 Chrome 又慢又开不了窗口复用。所以「起浏览器」留在
+ * 长活的 tool 进程里，纯 CPU 的正文抽取（jsdom）才放进按需起停的脚本。
  *
  * 健壮性：
  *   - 缓存的 Chrome 实例会失活（用户手动关了窗口 / 进程崩了），
  *     此时复用旧端口会 ECONNREFUSED。所以连不上就丢缓存、重启一次。
  *   - 浏览器整条路走不通（没装 Chromium / 无图形环境）就退到 HTTP，不直接报错。
  *
- * Day 1 决策：
- *   - 不下载 puppeteer 自带 Chromium（150MB+），跑用户机器现有的 Chrome
- *   - chrome 实例进程内缓存复用，多次抓取共用一个窗口、每次新开 tab
- *   - 给 SPA 留 1.5s 渲染缓冲
+ * 上下文铁律：HTML 又大又脏，传 save_to 让工具直接落盘、只回元信息（不回正文），
+ * 别把整页 HTML 灌进模型上下文。
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -29,9 +31,6 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type, type Static } from "typebox";
 import { launch as launchChrome, type LaunchedChrome } from "chrome-launcher";
 import CDP from "chrome-remote-interface";
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
-import TurndownService from "turndown";
 
 const schema = Type.Object({
   url: Type.String({
@@ -40,21 +39,19 @@ const schema = Type.Object({
   save_to: Type.Optional(
     Type.String({
       description:
-        "可选。给一个相对笔记目录的路径（如 raw/2026-06-01-标题.md），" +
-        "工具会把抓到的正文原样直接写进这个文件并自动建父目录。" +
-        "存大段原文（raw）时务必用它——别把正文返回后再用 write 工具重写一遍，那会让模型重新生成上万 token、很慢。",
+        "可选但强烈建议。给一个相对笔记目录的路径或目录，工具把渲染后 HTML 原样写进去并自动建父目录，" +
+        "返回值只给元信息不回正文。**推荐给目录**（以 / 结尾，如 raw/.html/），" +
+        "文件名由工具按 URL 自动生成，省得你瞎猜 slug；也可给完整文件名。" +
+        "HTML 又大又脏，几乎总该用 save_to 落盘，再用 extract 脚本把文件转成 markdown，不要把整页 HTML 拿回上下文。",
     }),
   ),
 });
 
-export type FetchContentInput = Static<typeof schema>;
+export type BrowserInput = Static<typeof schema>;
 
-export interface FetchContentDetails {
-  title: string;
+export interface BrowserDetails {
   finalUrl: string;
-  wordCount: number;
   htmlBytes: number;
-  markdownBytes: number;
   method: "browser" | "http";
   savedTo?: string;
 }
@@ -62,6 +59,9 @@ export interface FetchContentDetails {
 const SPA_RENDER_BUFFER_MS = 1500;
 const NAVIGATION_TIMEOUT_MS = 30_000;
 const HTTP_TIMEOUT_MS = 30_000;
+
+// 抓到的最终 URL 跟着 HTML 一起落盘（首行注释），extract 脚本据此解析相对链接 / 标题。
+const FINAL_URL_MARKER = "OPENNOTE_FINAL_URL";
 
 // 兜底 HTTP 抓取用的桌面 UA，避免被当成爬虫直接挡掉（公众号尤其挑这个）。
 const DESKTOP_UA =
@@ -87,13 +87,33 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+// URL → 中间 HTML 文件名 slug（host + 末段路径）。模型给目录时由工具自动命名，省得瞎猜。
+function slugFromUrl(u: string): string {
+  try {
+    const url = new URL(u);
+    const host = url.hostname.replace(/^www\./, "");
+    const last = url.pathname.split("/").filter(Boolean).pop() ?? "";
+    const tail = last.replace(/\.(html?|php|aspx?)$/i, "");
+    const slug = [host, tail]
+      .filter(Boolean)
+      .join("-")
+      .replace(/[^\p{L}\p{N}-]+/gu, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase();
+    return (slug || "page").slice(0, 50);
+  } catch {
+    return "page";
+  }
+}
+
 // ECONNREFUSED / socket hang up 这类，基本都是缓存的 Chrome 已经死了。
 function isConnectionError(err: unknown): boolean {
   const m = errMessage(err);
   return /ECONNREFUSED|ECONNRESET|socket hang up|connect/i.test(m);
 }
 
-// ---- 进程内 Chrome 缓存。第一次 fetch 时启动，后续复用 ----
+// ---- 进程内 Chrome 缓存。第一次抓取时启动，后续复用 ----
 
 let cachedChrome: LaunchedChrome | undefined;
 
@@ -197,70 +217,17 @@ async function fetchViaHttp(
   return { html, finalUrl: res.url || url };
 }
 
-function makeTurndown(): TurndownService {
-  return new TurndownService({
-    headingStyle: "atx",
-    codeBlockStyle: "fenced",
-  });
-}
-
-// 公众号正文在 #js_content 里、靠 JS 揭开，readability 抓不到（HTTP 兜底下尤其明显）。
-// 它是 opennote 最主要的抓取对象，所以单独认一下：有 #js_content 就直接取，配 og:title。
-function extractWeChat(
-  doc: Document,
-): { title: string; markdown: string; wordCount: number } | null {
-  const node = doc.querySelector("#js_content");
-  const text = node?.textContent?.trim() ?? "";
-  if (!node || text.length < 200) return null;
-
-  const title =
-    doc
-      .querySelector("meta[property='og:title']")
-      ?.getAttribute("content")
-      ?.trim() ||
-    doc.querySelector("#activity-name")?.textContent?.trim() ||
-    doc.title ||
-    "(无标题)";
-
-  const markdown = makeTurndown().turndown(node.innerHTML);
-  return { title, markdown, wordCount: text.length };
-}
-
-function extractArticle(
-  html: string,
-  finalUrl: string,
-): { title: string; markdown: string; wordCount: number } {
-  const dom = new JSDOM(html, { url: finalUrl });
-  const doc = dom.window.document;
-
-  // 公众号走专门通道
-  const wechat = extractWeChat(doc);
-  if (wechat) return wechat;
-
-  const article = new Readability(doc).parse();
-  if (!article || !article.content) {
-    throw new Error(`Readability 提取正文失败：${finalUrl}`);
-  }
-
-  const markdown = makeTurndown().turndown(article.content);
-  const wordCount = (article.textContent ?? "").trim().length;
-  const title = article.title ?? "(无标题)";
-  return { title, markdown, wordCount };
-}
-
-export function createFetchContentTool(notesDir: string): AgentTool<typeof schema> {
+export function createBrowserTool(notesDir: string): AgentTool<typeof schema> {
   return {
-    name: "fetch_content",
-    label: "抓取网页内容",
+    name: "browser",
+    label: "浏览器抓取",
     description:
-      "抓取一个 URL，返回干净的 markdown 正文。" +
+      "用浏览器打开一个 URL，返回渲染后的 HTML（不是 markdown，也不抽正文）。" +
       "优先调起用户系统已装的 Chrome / Edge / Brave 等 Chromium 系浏览器（用户能看到窗口弹出），" +
-      "通过 CDP 抓渲染后 HTML；浏览器起不来或端口连不上时，自动退回纯 HTTP 抓取。" +
-      "抓到 HTML 后用 readability + turndown 提取正文转 markdown。" +
-      "适用：公众号文章、博客、新闻、文档站这类有明确正文结构的页面。" +
-      "局限：纯 SPA 类应用（如 X 时间线、小红书）在 HTTP 兜底下效果不稳定，需要浏览器路径；" +
-      "视频站只能拿到页面元数据，字幕需要专门工具。" +
-      "要把原文存成文件时，传 save_to 让工具直接落盘，不要拿到返回值后再用 write 重写一遍。",
+      "通过 CDP 抓 JS 渲染后的 HTML；浏览器起不来或端口连不上时，自动退回纯 HTTP 抓取。" +
+      "适用：任何要拿到页面 DOM 的场景——公众号、博客、新闻、文档站、SPA。" +
+      "正文抽取交给后续脚本（如 wiki-ingest 的 extract.mjs）。" +
+      "几乎总该传 save_to 把 HTML 落盘——HTML 又大又脏，别拿回上下文。",
     parameters: schema,
     async execute(_toolCallId, { url, save_to }, signal) {
       if (signal?.aborted) throw new Error("Operation aborted");
@@ -291,36 +258,31 @@ export function createFetchContentTool(notesDir: string): AgentTool<typeof schem
       }
 
       const { html, finalUrl } = page;
-      const { title, markdown, wordCount } = extractArticle(html, finalUrl);
+      const htmlBytes = Buffer.byteLength(html, "utf8");
 
-      const fullText =
-        `# ${title}\n\n` +
-        `${markdown}\n\n` +
-        `---\n来源：${finalUrl}\n字数：${wordCount}`;
-
-      // save_to：把正文直接落盘（相对路径按笔记目录解析），模型不必拿到返回值再重写一遍。
+      // save_to：HTML 直接落盘（相对路径按笔记目录解析），首行写最终 URL 供 extract 用。
+      // 返回值只回元信息，不把整页 HTML 灌进上下文。
       let savedTo: string | undefined;
       if (save_to) {
-        savedTo = path.isAbsolute(save_to) ? save_to : path.join(notesDir, save_to);
+        // save_to 以 / 结尾 = 目录，文件名按 URL 自动生成；否则当成完整文件名。
+        const isDir = /[/\\]$/.test(save_to);
+        const base = path.isAbsolute(save_to)
+          ? save_to
+          : path.join(notesDir, save_to);
+        savedTo = isDir ? path.join(base, `${slugFromUrl(finalUrl)}.html`) : base;
         mkdirSync(path.dirname(savedTo), { recursive: true });
-        writeFileSync(savedTo, fullText);
+        writeFileSync(savedTo, `<!--${FINAL_URL_MARKER}:${finalUrl}-->\n${html}`);
       }
 
       const text = savedTo
-        ? `（正文已存到 ${savedTo}，共 ${wordCount} 字；无需再用 write 工具写一遍。下面是同一份内容，供你写摘要/概念页用。）\n\n${fullText}`
-        : fullText;
+        ? `已抓取（${method}）：${finalUrl}\n` +
+          `HTML 共 ${htmlBytes} 字节，已存到 ${savedTo}。\n` +
+          `下一步：用 extract 脚本把它转成 markdown，别把 HTML 拿回这里。`
+        : html;
 
       return {
         content: [{ type: "text", text }],
-        details: {
-          title,
-          finalUrl,
-          wordCount,
-          htmlBytes: html.length,
-          markdownBytes: markdown.length,
-          method,
-          savedTo,
-        },
+        details: { finalUrl, htmlBytes, method, savedTo },
       };
     },
   };

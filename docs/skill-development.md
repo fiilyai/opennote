@@ -13,7 +13,7 @@
 
 一句话：**tool 给能力，skill 给打法。**
 
-举例：opennote 已经有 `fetch_content` / `write` 两个 tool。一个「整理公众号文章成结构化笔记」的 skill，本身不写任何代码，只是用自然语言告诉 LLM：先用 `fetch_content` 抓正文 → 按固定模板提取标题/作者/要点 → 用 `write` 存成 `YYYY-MM-DD-标题.md`。打法被沉淀进了一个文件，下次同类任务 LLM 照着做。
+举例：opennote 已经有 `browser` / `write` 两个 tool。一个「整理公众号文章成结构化笔记」的 skill，主体只是用自然语言告诉 LLM：先用 `browser` 抓页面 → 按固定模板提取标题/作者/要点 → 用 `write` 存成 `YYYY-MM-DD-标题.md`。打法被沉淀进了一个文件，下次同类任务 LLM 照着做。skill 也可以带一个脚本干固定的机械活（如 wiki-ingest 的 `extract.mjs` 抽正文、parse-bilibili 调 API），用 `bash` 跑——但路由和编排仍是这段自然语言说了算。
 
 ---
 
@@ -42,7 +42,7 @@ disable-model-invocation: false
 
 碰到 mp.weixin.qq.com 链接时：
 
-1. 用 fetch_content 抓正文
+1. 用 browser 抓页面
 2. 按下面模板提取字段……
 3. 用 write 存成 `YYYY-MM-DD-标题.md`
 

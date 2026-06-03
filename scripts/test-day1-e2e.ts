@@ -6,7 +6,7 @@
  *
  * 期望：
  *   1. 用户系统 Chrome 弹出窗口
- *   2. fetch_content 被调用，URL 是测试链接
+ *   2. browser 被调用，URL 是测试链接（Day 4 起抓取工具从 fetch_content 改名 browser）
  *   3. write tool 被调用，文件落到 ~/.opennote/notes/ 下
  *   4. 笔记文件实际存在并有内容
  */
@@ -95,11 +95,11 @@ async function main() {
     }
   }
 
-  const fetched = callLog.some((c) => c.tool === "fetch_content");
+  const fetched = callLog.some((c) => c.tool === "browser");
   const wrote = callLog.some((c) => c.tool === "write");
   const hasFile = newFiles.length > 0;
 
-  console.log(`\nfetch_content 被调用：${fetched ? "✅" : "❌"}`);
+  console.log(`\nbrowser 被调用：${fetched ? "✅" : "❌"}`);
   console.log(`write 被调用：${wrote ? "✅" : "❌"}`);
   console.log(`新笔记文件已生成：${hasFile ? "✅" : "❌"}`);
 

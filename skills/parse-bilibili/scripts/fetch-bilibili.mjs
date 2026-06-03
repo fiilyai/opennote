@@ -5,18 +5,20 @@
  * 纯 Node（global fetch / FormData / Blob，Node 18+），不依赖 yt-dlp / lux / ffmpeg，跨平台。
  * 链路：view API 取元信息 → WBI 签名 + playurl 取纯音频流 → 下载 → 硅基 SenseVoice 转写。
  *
- * 用法：  node fetch-bilibili.mjs <bilibili-url-or-BV>
+ * 用法：  node fetch-bilibili.mjs <bilibili-url-or-BV> [--save <raw目录>] [--date YYYY-MM-DD]
  * Key ： 硅基流动 key，按优先级取：
  *          1. 环境变量 SILICONFLOW_API_KEY
  *          2. 本 skill 目录下的 .env 文件（SILICONFLOW_API_KEY=sk-...，已被 gitignore）
  *        复制同目录 .env.example 为 .env 填上 key 即可。
- * 输出：  结构化 markdown 到 stdout（元信息 + 简介 + 口播转写）
+ * 输出：  结构化 markdown 到 stdout（元信息 + 简介 + 口播转写）。
+ *        传 --save <目录> 则脚本按视频真实标题生成 `<目录>/<date>-<标题slug>.md` 自己写盘
+ *        （文件名不交给模型猜），并把存到哪打到 stderr。
  *
  * 边界：音频 >50MB（约 >1 小时）超硅基单文件上限，脚本报错——长视频切片是后续计划。
  */
 
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -78,6 +80,18 @@ function signWbi(params, mixinKey) {
 
 const fmtDuration = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 
+// 标题 → 文件名 slug：中文直接保留，空白/标点（含全角逗号、书名号）一律转连字符，截断。
+function slugify(s) {
+  const cleaned = (s || "")
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return cleaned.slice(0, 40) || "untitled";
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
 // 取硅基 key：环境变量优先，否则从本 skill 目录的 .env 加载（.env 已被 gitignore）
 function resolveApiKey() {
   if (!process.env.SILICONFLOW_API_KEY) {
@@ -101,22 +115,33 @@ function saveApiKey(key) {
 }
 
 async function main() {
-  const [arg1, arg2] = process.argv.slice(2);
+  const argv = process.argv.slice(2);
 
   // 子命令：配置 / 自检 key
-  if (arg1 === "--set-key") {
-    saveApiKey(arg2 ?? "");
+  if (argv[0] === "--set-key") {
+    saveApiKey(argv[1] ?? "");
     return;
   }
-  if (arg1 === "--check-key") {
+  if (argv[0] === "--check-key") {
     const k = resolveApiKey();
     console.log(k ? `已配置（…${k.slice(-4)}）` : "未配置");
     process.exit(k ? 0 : 1);
   }
 
-  const input = arg1;
+  // 抓取路径：positional 链接 + 可选 --save <目录> / --date <YYYY-MM-DD>
+  let input;
+  let saveDir;
+  let date;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--save") saveDir = argv[++i];
+    else if (a === "--date") date = argv[++i];
+    else if (!input) input = a;
+  }
   if (!input) {
-    console.error("用法: node fetch-bilibili.mjs <bilibili-url-or-BV> | --set-key <sk-...> | --check-key");
+    console.error(
+      "用法: node fetch-bilibili.mjs <bilibili-url-or-BV> [--save <raw目录>] [--date YYYY-MM-DD] | --set-key <sk-...> | --check-key",
+    );
     process.exit(2);
   }
 
@@ -179,7 +204,7 @@ async function main() {
   const transcript = (asrJson.text ?? "").trim();
 
   // 5. 结构化 markdown 输出
-  process.stdout.write(
+  const out =
     [
       "---",
       `title: ${meta.title}`,
@@ -201,8 +226,17 @@ async function main() {
       "",
       transcript || "(转写为空)",
       "",
-    ].join("\n"),
-  );
+    ].join("\n");
+
+  // --save：脚本按视频真实标题命名 raw 文件、自己写盘，文件名不交给模型猜。
+  if (saveDir) {
+    const dest = path.join(saveDir, `${date || today()}-${slugify(meta.title)}.md`);
+    mkdirSync(path.dirname(dest), { recursive: true });
+    writeFileSync(dest, out);
+    process.stderr.write(`[parse-bilibili] 已存 ${dest}（标题「${meta.title}」）\n`);
+  }
+
+  process.stdout.write(out);
 }
 
 main().catch((e) => {

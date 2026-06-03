@@ -1,11 +1,12 @@
 /**
- * Day 2 端到端：collect-content skill 的 LLM Wiki ingest。
+ * Day 2 端到端：wiki-ingest skill 的 LLM Wiki ingest。
+ *   （Day 4 起 skill 改名 collect-content → wiki-ingest，抓取由 browser tool + extract.mjs 接手）
  *
  * 跑法：pnpm tsx scripts/test-day2-collect-e2e.ts
  *
  * 丢一个链接，期望 agent：
- *   1. 命中 collect-content（catalog 里有）→ read SKILL.md
- *   2. fetch_content 抓正文
+ *   1. 命中 wiki-ingest（catalog 里有）→ read SKILL.md
+ *   2. browser 抓 HTML + extract.mjs 抽正文
  *   3. write 到 raw/、wiki/summaries/，并抽概念到 wiki/concepts/ 或 entities/
  *   4. 维护 wiki/index.md
  * 用独立临时笔记目录隔离，事后打印生成的目录树。
