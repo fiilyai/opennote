@@ -18,15 +18,18 @@ import { z } from "zod";
 
 const DEFAULT_MODEL = "anthropic:claude-sonnet-4-20250514";
 
-const DEFAULT_SYSTEM_PROMPT = `你是 opennote，一个帮人把零散链接织成结构化笔记的 agent。
-- 收到链接时，先理解内容类型，再按合适的方式整理成笔记。
-- 直接动手，不解释你要做什么；完成后只报告结果。
-- 出错才说话。`;
+// 身份与风格的默认值不放这里——它们是 prompt 内容，归 agent/system-prompt.ts
+// （DEFAULT_IDENTITY / DEFAULT_PERSONA）。config 只透传用户填的原始值。
 
 const ConfigSchema = z.object({
   agent: z
     .object({
       model: z.string().optional(),
+      // 身份：一句话「我是谁、为谁做事」。不填走 system-prompt.ts 的默认。
+      identity: z.string().optional(),
+      // 风格：说话调性。不填走默认。
+      persona: z.string().optional(),
+      // 完全覆盖逃生舱：填了就整块替代结构化正文（含工作区约定），一般用 identity/persona 即可。
       systemPrompt: z.string().optional(),
       apiKey: z.string().optional(),
       apiKeyEnv: z.string().optional(),
@@ -64,7 +67,9 @@ const ConfigSchema = z.object({
 export interface OpennoteConfig {
   agent: {
     model: string;
-    systemPrompt: string;
+    identity?: string;
+    persona?: string;
+    systemPrompt?: string;
     apiKey?: string;
     apiKeyEnv?: string;
     baseUrl?: string;
@@ -115,7 +120,9 @@ export function loadConfig(explicitPath?: string): OpennoteConfig {
   return {
     agent: {
       model: parsed.agent?.model ?? DEFAULT_MODEL,
-      systemPrompt: parsed.agent?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+      identity: parsed.agent?.identity,
+      persona: parsed.agent?.persona,
+      systemPrompt: parsed.agent?.systemPrompt,
       apiKey: parsed.agent?.apiKey,
       apiKeyEnv: parsed.agent?.apiKeyEnv,
       baseUrl: parsed.agent?.baseUrl,

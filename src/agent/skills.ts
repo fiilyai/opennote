@@ -37,10 +37,13 @@ function skillDirs(config: OpennoteConfig): string[] {
 }
 
 /**
- * 在 config.agent.systemPrompt 后面拼上 skills 菜单（`<available_skills>` 段）。
+ * 加载 skills，返回渐进披露的 skills 菜单文本（`<available_skills>` 段）：
+ * 只含 name + description + 路径，正文等 LLM 用 read 工具按需读。
  * 这段只在 read 工具可用时由 Pi 生效，opennote 已注册 read，天然满足。
+ *
+ * 纯粹负责「加载 + 格式化菜单」；拼进完整 system prompt 是 system-prompt.ts 的活。
  */
-export function composeSystemPrompt(
+export function loadSkillsBlock(
   config: OpennoteConfig,
   opts: { debug?: boolean } = {},
 ): string {
@@ -61,5 +64,5 @@ export function composeSystemPrompt(
     }
   }
 
-  return config.agent.systemPrompt + formatSkillsForPrompt(skills);
+  return formatSkillsForPrompt(skills);
 }

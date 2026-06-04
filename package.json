@@ -16,7 +16,9 @@
     "chat": "tsx bin/opennote.ts chat",
     "build": "tsc",
     "start": "node dist/bin/opennote.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx scripts/test-day6-prompt.ts",
+    "test:e2e": "tsx scripts/test-day2-skill-e2e.ts && tsx scripts/test-day2-collect-e2e.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.75.5",

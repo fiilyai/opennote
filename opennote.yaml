@@ -55,29 +55,25 @@ agent:
   apiKey: "sk-kimi-71fR8E5lt3eL5wcYbyir6Oj9OoEgMqsIvhb9recg0LgP9UmLkMVEHsPxsgohn4Oz"
   # apiKeyEnv: KIMI_API_KEY
 
-  # 系统提示词。Day 6 会教你怎么调这个。
-  systemPrompt: |
-    你是 opennote，帮快速记录、整理和回顾想法的 AI 笔记助手。
+  # === 系统提示词（Day 6）===
+  # opennote 的 system prompt 是分段拼出来的（见 src/agent/system-prompt.ts）：
+  #   身份 → 风格 → 笔记目录约定 → 动手纪律 → skill 路由 → skills 菜单 → 今天日期
+  # 工作区约定、纪律、skill 路由这些「机制」由代码统一管，会跟着工具改名自动更新，
+  # 这里不用手动维护。只要配下面两个字段，就能给它换个身份和口吻：
 
-    ## 笔记目录约定
-    - 你的工具 read / write / edit / open_path 已经被设置成以 `~/.opennote/notes/` 为工作目录（cwd）
-    - path / target 字段用**相对 cwd 的路径**：可以是纯文件名（`2026-05-28-某文章.md`），也可以带子目录（`raw/2026-05-28-某文章.md`、`wiki/concepts/时间管理.md`），父目录会自动创建
-    - **不要**带 `~/`、`/` 开头的绝对路径，也不要带 `notes/` 前缀，否则文件会落到错误的目录
-    - 文件名规范：`{YYYY-MM-DD}-{slug}.md` 或 `{slug}.md`，slug 是 2-6 个中英文关键词，不带空格
+  # 身份：一句话「我是谁、为谁做事」。不填用内置默认。
+  # identity: Opennote，男，26 岁，经验丰富又稳重的内容主编，把零散链接和想法织成结构化笔记，帮用户高效积累知识、产出内容。
 
-    ## 处理用户给的链接（"存起来 / 整理 / 保存"等指令）
-    必须按这个顺序，一步不能少：
-    1. **调 fetch_content(url)** —— 抓取并拿到 markdown 正文
-    2. **调 write(path, content)** —— 把整理后的内容真正写到笔记目录
-       path 形如 `2026-05-28-标题.md`（纯文件名，cwd 自动加前缀）
-    3. write 工具执行成功之后，才能告诉用户"已保存到 xxx.md"
+  # 风格：说话的调性。不填用内置默认（中文、简短、直接动手、出错才出声）。
+  # persona: |
+  #   - 中文回复，简短。
+  #   - 像个话不多的资深编辑：直接动手，完成才报告。
+  #   - 出错或要确认时才多说话。
 
-    fetch_content 返回的内容只是给你看的中间态，**不算保存**。不调 write 就告诉用户已保存 = 撒谎。
-
-    ## 风格
-    - 直接动手，不解释你要做什么；完成后只报告结果
-    - 出错才说话
-    - 中文回复，简短
+  # 逃生舱：想完全自己写就填 systemPrompt，它会整块替代上面的结构化正文
+  # （连笔记目录约定都要你自己写）。一般用 identity + persona 就够，别动这个。
+  # systemPrompt: |
+  #   你是 ...
 
 # 运行时数据存哪。默认放在 ~/.opennote/ 下，跟着用户走，不跟着 git checkout。
 paths:

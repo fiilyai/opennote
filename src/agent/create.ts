@@ -32,14 +32,14 @@ import { ensureWikiScaffold } from "../notes/scaffold.js";
 import { expandPath } from "../utils/paths.js";
 import { resolveModel, makeApiKeyResolver } from "./model.js";
 import { setupDebug, isDebugEnabled } from "./debug.js";
-import { composeSystemPrompt } from "./skills.js";
+import { buildSystemPrompt } from "./system-prompt.js";
 
 export function createOpennoteAgent(config: OpennoteConfig): Agent {
   const debug = setupDebug();
 
   const agent = new Agent({
     initialState: {
-      systemPrompt: composeSystemPrompt(config, { debug: isDebugEnabled() }),
+      systemPrompt: buildSystemPrompt(config, { debug: isDebugEnabled() }),
       model: resolveModel(config),
     },
     getApiKey: makeApiKeyResolver(config),
