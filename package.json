@@ -17,7 +17,7 @@
     "build": "tsc",
     "start": "node dist/bin/opennote.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/test-day6-prompt.ts",
+    "test": "tsx scripts/test-day6-prompt.ts && tsx scripts/test-day7-session.ts",
     "test:e2e": "tsx scripts/test-day2-skill-e2e.ts && tsx scripts/test-day2-collect-e2e.ts"
   },
   "dependencies": {

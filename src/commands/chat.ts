@@ -9,7 +9,15 @@
 import { createInterface } from "node:readline/promises";
 
 import { createOpennoteAgent } from "../agent/create.js";
+import { makeApiKeyResolver } from "../agent/model.js";
 import { loadConfig } from "../config.js";
+import {
+  maybeCompact,
+  getCtxUsage,
+  formatCtx,
+  type CompactionDeps,
+} from "../session/compaction.js";
+import { handleSessionCommand } from "../session/commands.js";
 
 interface ChatOptions {
   configPath?: string;
@@ -20,6 +28,14 @@ const EXIT_COMMANDS = new Set(["/exit", "/quit", "exit", "quit", "/q"]);
 export async function runChat(options: ChatOptions = {}): Promise<void> {
   const config = loadConfig(options.configPath);
   const agent = createOpennoteAgent(config);
+
+  // 上下文压缩依赖：模型 / key / headers 跟 agent 用的同一套。
+  const resolveKey = makeApiKeyResolver(config);
+  const compaction: CompactionDeps = {
+    model: agent.state.model,
+    apiKey: resolveKey(agent.state.model.provider) ?? "",
+    headers: config.agent.headers,
+  };
 
   printBanner(config);
 
@@ -71,7 +87,20 @@ export async function runChat(options: ChatOptions = {}): Promise<void> {
         break;
       }
       try {
+        // 先看是不是斜杠命令（/compact、/clear、/ctx），是就直接处理、不喂 agent。
+        const cmdReply = await handleSessionCommand(input, agent, compaction);
+        if (cmdReply !== null) {
+          console.log(cmdReply);
+          continue;
+        }
         await agent.prompt(input);
+        // 这轮加完了，看要不要压缩，并把 ctx 用量带给用户。
+        const outcome = await maybeCompact(agent, compaction);
+        const usage = getCtxUsage(agent.state.messages, agent.state.model);
+        const prefix = outcome
+          ? `[已压缩 ${(outcome.tokensBefore / 1000).toFixed(1)}k → ${(outcome.tokensAfter / 1000).toFixed(1)}k] `
+          : "";
+        console.log(`${prefix}[${formatCtx(usage)}]`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`\n[对话出错] ${msg}`);

@@ -16,6 +16,9 @@ import { parseInbound } from "./inbound.js";
 import type { ResolveAgent } from "./router.js";
 import { runAgentOnce } from "./run-once.js";
 import { sendText } from "./send.js";
+import { handleSessionCommand } from "../session/commands.js";
+import { formatCtx, type CompactionDeps } from "../session/compaction.js";
+import type { SessionStore } from "../session/store.js";
 
 const SESSION_EXPIRED_ERRCODE = -14;
 const RETRY_DELAY_MS = 2_000;
@@ -57,6 +60,10 @@ export interface MonitorOpts {
   /** 白名单：只有这些 ilink_user_id 能驱动 agent。 */
   allowFrom: string[];
   resolveAgent: ResolveAgent;
+  /** 按 from 隔离的会话存储。 */
+  sessionStore: SessionStore;
+  /** 上下文压缩依赖（model / apiKey / headers）。 */
+  compaction: CompactionDeps;
   abortSignal: AbortSignal;
   log?: (msg: string) => void;
 }
@@ -134,25 +141,61 @@ export async function runMonitor(opts: MonitorOpts): Promise<void> {
         }
 
         log(`[weixin] ← ${inbound.from}: ${inbound.body.slice(0, 50)}`);
-        let reply: string;
-        try {
-          reply = await runAgentOnce(agent, inbound.body, {
-            abortSignal: opts.abortSignal,
-          });
-        } catch (err) {
-          reply = `处理出错：${err instanceof Error ? err.message : String(err)}`;
+        // 按 from 取会话（接着上次聊）。
+        const session = opts.sessionStore.get(inbound.from);
+
+        // 先看是不是斜杠命令（/compact、/clear 等），是就直接处理、不喂 agent。
+        // 命令操作 agent，所以先把会话载入 agent、处理完再存回。
+        agent.state.messages = session.messages;
+        const cmdReply = await handleSessionCommand(
+          inbound.body,
+          agent,
+          opts.compaction,
+        );
+        if (cmdReply !== null) {
+          session.messages = agent.state.messages;
+          session.updatedAt = Date.now();
+          opts.sessionStore.save(session);
+          try {
+            await sendText({
+              baseUrl: opts.baseUrl,
+              token: opts.token,
+              to: inbound.from,
+              text: cmdReply,
+              contextToken: getContextToken(opts.accountId, inbound.from),
+            });
+            log(`[weixin] → ${inbound.from}: [命令] ${inbound.body.slice(0, 30)}`);
+          } catch (err) {
+            log(`[weixin] 回复失败 to=${inbound.from}: ${describeError(err)}`);
+          }
+          continue;
         }
-        if (!reply) continue;
+
+        // run-once 内部已兜超时/错误。
+        const result = await runAgentOnce(agent, session, inbound.body, {
+          compaction: opts.compaction,
+          abortSignal: opts.abortSignal,
+          log,
+        });
+        opts.sessionStore.save(session);
+
+        if (!result.reply) continue;
+
+        // 每条回复都带上 ctx 用量；压缩了就标一下。
+        const ctxLine = formatCtx(result.ctx);
+        const text = result.compacted
+          ? `${result.reply}\n\n${ctxLine}（已压缩）`
+          : `${result.reply}\n\n${ctxLine}`;
 
         try {
           await sendText({
             baseUrl: opts.baseUrl,
             token: opts.token,
             to: inbound.from,
-            text: reply,
+            text,
             contextToken: getContextToken(opts.accountId, inbound.from),
           });
-          log(`[weixin] → ${inbound.from}: ${reply.slice(0, 50)}`);
+          log(`[weixin] → ${inbound.from}: ${result.reply.slice(0, 50)} | ${ctxLine}`);
         } catch (err) {
           log(`[weixin] 回复失败 to=${inbound.from}: ${describeError(err)}`);
         }

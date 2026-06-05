@@ -4,7 +4,10 @@
  */
 
 import { createOpennoteAgent } from "../agent/create.js";
+import { makeApiKeyResolver } from "../agent/model.js";
 import { loadConfig } from "../config.js";
+import { SessionStore } from "../session/store.js";
+import type { CompactionDeps } from "../session/compaction.js";
 import { firstAccount } from "../weixin/accounts.js";
 import { DEFAULT_BASE_URL } from "../weixin/ilink.js";
 import { runMonitor } from "../weixin/monitor.js";
@@ -40,6 +43,15 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   const agent = createOpennoteAgent(config);
   const baseUrl = account.baseUrl || config.weixin.baseUrl || DEFAULT_BASE_URL;
 
+  // 按 from 隔离的会话存储 + 上下文压缩依赖（跟 agent 用同一套 model / key / headers）。
+  const sessionStore = new SessionStore();
+  const resolveKey = makeApiKeyResolver(config);
+  const compaction: CompactionDeps = {
+    model: agent.state.model,
+    apiKey: resolveKey(agent.state.model.provider) ?? "",
+    headers: config.agent.headers,
+  };
+
   const controller = new AbortController();
   process.on("SIGINT", () => {
     console.log("\n收到退出信号，停止监听...");
@@ -52,6 +64,8 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     accountId: account.accountId,
     allowFrom: config.weixin.allowFrom,
     resolveAgent: singleAgentRouter(agent),
+    sessionStore,
+    compaction,
     abortSignal: controller.signal,
   });
 }
