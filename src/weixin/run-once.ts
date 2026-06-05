@@ -22,8 +22,11 @@ import {
 } from "../session/compaction.js";
 import type { Session } from "../session/store.js";
 
-/** 单条消息处理上限。多步 ingest 留足余量，又不至于卡死时干等太久。 */
-const DEFAULT_TIMEOUT_MS = 180_000;
+/**
+ * 单条消息处理上限。一次完整 ingest（抓取 + 抽取 + 写多个 wiki 页）是重活，
+ * 慢模型下几轮累计容易破 3 分钟，给到 5 分钟留足余量；真卡死才靠它兜底。
+ */
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 export interface RunSessionDeps {
   /** 压缩依赖（model / apiKey / headers）。 */
@@ -34,6 +37,8 @@ export interface RunSessionDeps {
   abortSignal?: AbortSignal;
   /** 进度日志：打印 agent 处理过程中的工具调用，方便排查卡在哪一步。 */
   log?: (msg: string) => void;
+  /** 进度回执：处理较久的关键节点（如抓取完成）主动给用户报一句，别让他干等。 */
+  onProgress?: (msg: string) => void;
 }
 
 export interface RunSessionResult {
@@ -89,12 +94,19 @@ export async function runAgentOnce(
   let errorMessage = "";
   const startedAt = Date.now();
   const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
+  let progressSent = false;
   const unsubscribe = agent.subscribe((event) => {
     if (event.type === "tool_execution_start") {
       // 打印每次工具调用，超时时一看日志就知道卡在哪一步。
       deps.log?.(`[weixin]   ⚙ ${elapsed()} 调用 ${event.toolName}`);
     } else if (event.type === "tool_execution_end") {
       deps.log?.(`[weixin]   ✓ ${elapsed()} ${event.toolName} 完成`);
+      // 抓取完成是 ingest 里耗时的转折点：之后还要抽正文 + 写多个 wiki 页（慢模型下要等）。
+      // 主动报一句，让用户知道在进行，不是卡死。整条消息只报一次。
+      if (!progressSent && event.toolName === "browser") {
+        progressSent = true;
+        deps.onProgress?.("已抓到网页内容，正在整理成笔记，稍等…");
+      }
     } else if (event.type === "message_end") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const msg = (event as any).message;

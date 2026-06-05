@@ -172,10 +172,21 @@ export async function runMonitor(opts: MonitorOpts): Promise<void> {
         }
 
         // run-once 内部已兜超时/错误。
+        // 处理久的关键节点主动给用户报一句进度（fire-and-forget，不阻塞处理）。
+        const onProgress = (msg: string) => {
+          sendText({
+            baseUrl: opts.baseUrl,
+            token: opts.token,
+            to: inbound.from,
+            text: msg,
+            contextToken: getContextToken(opts.accountId, inbound.from),
+          }).catch((err) => log(`[weixin] 进度发送失败: ${describeError(err)}`));
+        };
         const result = await runAgentOnce(agent, session, inbound.body, {
           compaction: opts.compaction,
           abortSignal: opts.abortSignal,
           log,
+          onProgress,
         });
         opts.sessionStore.save(session);
 
