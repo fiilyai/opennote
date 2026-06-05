@@ -17,7 +17,6 @@
  */
 
 import {
-  estimateContextTokens,
   estimateTokens,
   generateSummary,
   shouldCompact,
@@ -57,9 +56,21 @@ export interface CtxUsage {
   percent: number;
 }
 
+/**
+ * 按消息内容估算 token 总数（逐条 estimateTokens 累加）。
+ *
+ * 不用 Pi 的 estimateContextTokens——它优先读「上一次 provider 返回的 usage」，而压缩
+ * 改写了历史后，保留段里最后那条 assistant 消息仍带着压缩前的旧 usage，会让压缩后的
+ * 估算停在压缩前的数（显示像没压）。逐条估算虽不如 provider usage 精确，但对压缩
+ * 即时可见、前后可比，是这里要的。
+ */
+function estimateMessagesTokens(messages: AgentMessage[]): number {
+  return messages.reduce((sum, m) => sum + estimateTokens(m), 0);
+}
+
 /** 算当前上下文用量。 */
 export function getCtxUsage(messages: AgentMessage[], model: AnyModel): CtxUsage {
-  const tokens = estimateContextTokens(messages).tokens;
+  const tokens = estimateMessagesTokens(messages);
   const window = model.contextWindow || 128_000;
   return { tokens, window, percent: (tokens / window) * 100 };
 }
@@ -116,7 +127,7 @@ async function doCompact(
 ): Promise<CompactionOutcome | null> {
   const settings = deps.settings ?? OPENNOTE_COMPACTION;
   const messages = agent.state.messages;
-  const before = estimateContextTokens(messages).tokens;
+  const before = estimateMessagesTokens(messages);
 
   const cut = findCutIndex(messages, settings.keepRecentTokens);
   if (cut <= 0) return null; // 全在 keepRecent 窗口内，没法压
@@ -142,7 +153,7 @@ async function doCompact(
   };
 
   agent.state.messages = [summaryMessage, ...recent];
-  const after = estimateContextTokens(agent.state.messages).tokens;
+  const after = estimateMessagesTokens(agent.state.messages);
   return { tokensBefore: before, tokensAfter: after };
 }
 
@@ -155,8 +166,8 @@ export async function maybeCompact(
   deps: CompactionDeps,
 ): Promise<CompactionOutcome | null> {
   const settings = deps.settings ?? OPENNOTE_COMPACTION;
-  const usage = estimateContextTokens(agent.state.messages);
-  if (!shouldCompact(usage.tokens, deps.model.contextWindow || 128_000, settings)) {
+  const tokens = estimateMessagesTokens(agent.state.messages);
+  if (!shouldCompact(tokens, deps.model.contextWindow || 128_000, settings)) {
     return null;
   }
   return doCompact(agent, deps, COMPACTION_INSTRUCTIONS);

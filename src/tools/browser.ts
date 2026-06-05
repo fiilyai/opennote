@@ -6,8 +6,9 @@
  *
  * 两条抓取路径，浏览器优先、HTTP 兜底：
  *   A. 浏览器（默认）：用 chrome-launcher 起系统已装的 Chromium 系浏览器，
- *      通过 CDP 抓 JS 渲染后的 HTML。能拿到 SPA / 懒加载的内容，用户也能看到窗口。
- *      已经开着浏览器就复用、只开个新 tab；没开才启动。抓完不关，留着复用。
+ *      通过 CDP 抓 JS 渲染后的 HTML，能拿到 SPA / 懒加载的内容。默认 headless 后台抓取，不弹窗。
+ *      已经开着就复用、只开新 tab；没开才启动。抓完空闲 3 秒彻底关掉，不常驻、
+      不在 dock / 状态栏挂着；3 秒内又来抓取就复用并取消关闭。
  *   B. HTTP 兜底：浏览器起不来 / 端口连不上时，直接 fetch 原始 HTML。
  *      公众号、博客这类服务端渲染的页面，纯 HTTP 就够了。
  *
@@ -113,20 +114,43 @@ function isConnectionError(err: unknown): boolean {
   return /ECONNREFUSED|ECONNRESET|socket hang up|connect/i.test(m);
 }
 
-// ---- 进程内 Chrome 缓存。第一次抓取时启动，后续复用 ----
+// ---- 进程内 Chrome：抓取时启动，空闲 3 秒彻底关掉（不常驻、不在 dock / 状态栏挂着）----
+// 连续抓取仍复用同一实例：每次抓取会取消待关定时器；空闲超过 3 秒才真正 kill。
+
+const IDLE_CLOSE_MS = 3_000;
 
 let cachedChrome: LaunchedChrome | undefined;
+let closeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function cancelScheduledClose(): void {
+  if (closeTimer) {
+    clearTimeout(closeTimer);
+    closeTimer = undefined;
+  }
+}
+
+/** 安排空闲 3 秒后彻底关闭 Chrome；期间再有抓取会取消它。 */
+function scheduleClose(): void {
+  cancelScheduledClose();
+  closeTimer = setTimeout(() => {
+    closeTimer = undefined;
+    void dropChrome();
+  }, IDLE_CLOSE_MS);
+}
 
 async function getChrome(): Promise<LaunchedChrome> {
+  cancelScheduledClose(); // 又要用了，别关
   if (cachedChrome) return cachedChrome;
   cachedChrome = await launchChrome({
-    chromeFlags: ["--new-window"],
-    startingUrl: "about:blank",
+    // headless 后台抓取：不弹窗、不占 dock / 状态栏。CDP 照常工作；懒加载图片靠 extract
+    // 的 unlazyImages 从 data-src 取，不依赖可视渲染，所以 headless 不影响抓全图。
+    chromeFlags: ["--headless=new", "--disable-gpu"],
   });
   return cachedChrome;
 }
 
 async function dropChrome(): Promise<void> {
+  cancelScheduledClose();
   const chrome = cachedChrome;
   cachedChrome = undefined;
   if (!chrome) return;
@@ -135,6 +159,14 @@ async function dropChrome(): Promise<void> {
   } catch {
     // 进程可能已经没了，忽略
   }
+}
+
+/**
+ * 供外部在退出时（serve 收到 SIGINT、chat 退出）彻底关掉 Chrome，
+ * 不等那 3 秒空闲定时器、不留残余进程。没开过浏览器时是 no-op。
+ */
+export async function closeBrowser(): Promise<void> {
+  await dropChrome();
 }
 
 interface RawPage {
@@ -193,6 +225,9 @@ async function fetchViaBrowser(url: string): Promise<RawPage> {
     await dropChrome();
     chrome = await getChrome();
     return await grabViaCDP(chrome, url);
+  } finally {
+    // 用完安排空闲 3 秒彻底关；3 秒内又来抓取会取消它（连续 ingest 仍复用）。
+    scheduleClose();
   }
 }
 

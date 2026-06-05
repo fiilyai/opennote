@@ -28,6 +28,17 @@ import type { Session } from "../session/store.js";
  */
 const DEFAULT_TIMEOUT_MS = 300_000;
 
+/**
+ * 关键工具 → 进度文案。模型调工具时常常不输出文字（KIMI 实测如此），没法靠它自己报，
+ * 用工具事件兜底报几个关键阶段。每个工具首次出现时报一次，read / edit 这类频繁小步不报，
+ * 免得刷屏。「整理」是最久的一步（写多个 wiki 页），给个预计让用户安心等。
+ */
+const STEP_MILESTONES: Record<string, string> = {
+  browser: "正在抓取网页…",
+  bash: "正在提取正文…",
+  write: "正在整理成笔记，这步稍久（约 1 分钟）…",
+};
+
 export interface RunSessionDeps {
   /** 压缩依赖（model / apiKey / headers）。 */
   compaction: CompactionDeps;
@@ -94,26 +105,26 @@ export async function runAgentOnce(
   let errorMessage = "";
   const startedAt = Date.now();
   const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
-  let progressSent = false;
+  const milestonesSent = new Set<string>();
   const unsubscribe = agent.subscribe((event) => {
     if (event.type === "tool_execution_start") {
       // 打印每次工具调用，超时时一看日志就知道卡在哪一步。
       deps.log?.(`[weixin]   ⚙ ${elapsed()} 调用 ${event.toolName}`);
+      // 关键阶段首次出现时给用户报一句进度（模型调工具不带文字，靠工具事件兜底）。
+      const milestone = STEP_MILESTONES[event.toolName];
+      if (milestone && !milestonesSent.has(event.toolName)) {
+        milestonesSent.add(event.toolName);
+        deps.onProgress?.(milestone);
+      }
     } else if (event.type === "tool_execution_end") {
       deps.log?.(`[weixin]   ✓ ${elapsed()} ${event.toolName} 完成`);
-      // 抓取完成是 ingest 里耗时的转折点：之后还要抽正文 + 写多个 wiki 页（慢模型下要等）。
-      // 主动报一句，让用户知道在进行，不是卡死。整条消息只报一次。
-      if (!progressSent && event.toolName === "browser") {
-        progressSent = true;
-        deps.onProgress?.("已抓到网页内容，正在整理成笔记，稍等…");
-      }
     } else if (event.type === "message_end") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const msg = (event as any).message;
       if (msg?.role === "assistant") {
         if (msg.errorMessage) errorMessage = String(msg.errorMessage);
         const t = extractAssistantText(msg);
-        if (t.trim()) reply = t;
+        if (t.trim()) reply = t.trim();
       }
     }
   });

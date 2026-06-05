@@ -18,6 +18,7 @@ import {
   type CompactionDeps,
 } from "../session/compaction.js";
 import { handleSessionCommand } from "../session/commands.js";
+import { closeBrowser } from "../tools/browser.js";
 
 interface ChatOptions {
   configPath?: string;
@@ -108,6 +109,7 @@ export async function runChat(options: ChatOptions = {}): Promise<void> {
     }
   } finally {
     rl.close();
+    await closeBrowser(); // 退出时彻底关掉可能开着的 Chrome
   }
 }
 

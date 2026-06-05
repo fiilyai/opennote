@@ -5,6 +5,7 @@
 
 import { createOpennoteAgent } from "../agent/create.js";
 import { makeApiKeyResolver } from "../agent/model.js";
+import { closeBrowser } from "../tools/browser.js";
 import { loadConfig } from "../config.js";
 import { SessionStore } from "../session/store.js";
 import type { CompactionDeps } from "../session/compaction.js";
@@ -68,4 +69,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     compaction,
     abortSignal: controller.signal,
   });
+
+  // 监听停了（SIGINT abort 后 monitor 退出），彻底关掉可能还开着的 Chrome。
+  await closeBrowser();
 }
