@@ -28,6 +28,7 @@ import {
 import type { OpennoteConfig } from "../config.js";
 import { createBrowserTool } from "../tools/browser.js";
 import { createOpenTool } from "../tools/open.js";
+import { createScheduleTools } from "../tools/schedule.js";
 import { ensureWikiScaffold } from "../notes/scaffold.js";
 import { expandPath } from "../utils/paths.js";
 import { resolveModel, makeApiKeyResolver } from "./model.js";
@@ -66,6 +67,9 @@ export function createOpennoteAgent(config: OpennoteConfig): Agent {
     createWriteTool(notesDir),
     createEditTool(notesDir),
     createBashTool(notesDir),
+    // Day 8：让 agent 听懂排程意图、自己把定时任务建起来（schedule/cancel/list_tasks）。
+    // 任务落到运行时 store，不碰 opennote.yaml；list 合并展示 yaml 声明的任务。
+    ...createScheduleTools({ configTasks: () => config.cron }),
   ];
 
   return agent;

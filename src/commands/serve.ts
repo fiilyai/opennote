@@ -9,9 +9,11 @@ import { closeBrowser } from "../tools/browser.js";
 import { loadConfig } from "../config.js";
 import { SessionStore } from "../session/store.js";
 import type { CompactionDeps } from "../session/compaction.js";
+import { createCronContext } from "../automation/setup.js";
 import { firstAccount } from "../weixin/accounts.js";
 import { DEFAULT_BASE_URL } from "../weixin/ilink.js";
 import { runMonitor } from "../weixin/monitor.js";
+import { createWeixinPush } from "../weixin/push.js";
 import { singleAgentRouter } from "../weixin/router.js";
 
 interface ServeOptions {
@@ -59,17 +61,31 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     controller.abort();
   });
 
-  await runMonitor({
-    baseUrl,
-    token: account.botToken,
-    accountId: account.accountId,
-    allowFrom: config.weixin.allowFrom,
-    resolveAgent: singleAgentRouter(agent),
+  // 定时任务（Day 8）：用独立 agent 实例，跟消息通道隔离，不互相踩 state.messages。
+  // 推送复用持久化的 context_token；任务没配 to 就默认推给白名单第一个人（一般就是你自己）。
+  const push = createWeixinPush(account, baseUrl);
+  const cron = createCronContext(config, {
     sessionStore,
-    compaction,
-    abortSignal: controller.signal,
+    push,
+    defaultTo: config.weixin.allowFrom[0],
   });
 
-  // 监听停了（SIGINT abort 后 monitor 退出），彻底关掉可能还开着的 Chrome。
+  // 监听循环 + 调度循环并行跑，共用同一个 abortSignal，Ctrl-C 一起停。
+  await Promise.all([
+    runMonitor({
+      baseUrl,
+      token: account.botToken,
+      accountId: account.accountId,
+      allowFrom: config.weixin.allowFrom,
+      resolveAgent: singleAgentRouter(agent),
+      sessionStore,
+      compaction,
+      cron: cron.commandDeps,
+      abortSignal: controller.signal,
+    }),
+    cron.startScheduler(controller.signal),
+  ]);
+
+  // 两个循环都停了（SIGINT abort），彻底关掉可能还开着的 Chrome。
   await closeBrowser();
 }

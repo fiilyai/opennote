@@ -10,6 +10,7 @@ import { createInterface } from "node:readline/promises";
 
 import { createOpennoteAgent } from "../agent/create.js";
 import { makeApiKeyResolver } from "../agent/model.js";
+import { createCronContext, type CronContext } from "../automation/setup.js";
 import { loadConfig } from "../config.js";
 import {
   maybeCompact,
@@ -37,6 +38,16 @@ export async function runChat(options: ChatOptions = {}): Promise<void> {
     apiKey: resolveKey(agent.state.model.provider) ?? "",
     headers: config.agent.headers,
   };
+
+  // 配了定时任务才装 cron 上下文（会另起一个独立 agent）；纯聊天不带它，保持轻。
+  // 终端里 /cron run 把结果直接打印出来（没有微信可推），方便调任务。
+  const cron: CronContext | undefined = config.cron.length
+    ? createCronContext(config, {
+        push: async (to, text) => console.log(`\n[cron → ${to}]\n${text}\n`),
+        defaultTo: "终端",
+        log: (m) => console.error(m),
+      })
+    : undefined;
 
   printBanner(config);
 
@@ -89,7 +100,7 @@ export async function runChat(options: ChatOptions = {}): Promise<void> {
       }
       try {
         // 先看是不是斜杠命令（/compact、/clear、/ctx），是就直接处理、不喂 agent。
-        const cmdReply = await handleSessionCommand(input, agent, compaction);
+        const cmdReply = await handleSessionCommand(input, agent, compaction, cron?.commandDeps);
         if (cmdReply !== null) {
           console.log(cmdReply);
           continue;

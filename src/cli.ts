@@ -9,6 +9,7 @@ import { Command } from "commander";
 import { runChat } from "./commands/chat.js";
 import { runLogin } from "./commands/login.js";
 import { runServe } from "./commands/serve.js";
+import { runTaskOnce } from "./commands/run.js";
 
 const VERSION = "0.0.1";
 
@@ -44,9 +45,13 @@ export async function run(argv: string[]): Promise<void> {
       await runServe({ configPath: options.config });
     });
 
-  // 后续 Day 8 加：
-  //   program.command("run <prompt>") →  单次执行
-  //   program.command("tidy")  →  cron 整理
+  program
+    .command("run <name>")
+    .description("立刻跑一条 cron 定时任务（不等时钟；也可交给系统 crontab 调起）")
+    .option("-c, --config <path>", "指定 opennote.yaml 路径")
+    .action(async (name: string, options: { config?: string }) => {
+      await runTaskOnce(name, { configPath: options.config });
+    });
 
   await program.parseAsync(argv);
 }

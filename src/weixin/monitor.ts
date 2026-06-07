@@ -16,7 +16,7 @@ import { parseInbound } from "./inbound.js";
 import type { ResolveAgent } from "./router.js";
 import { runAgentOnce } from "./run-once.js";
 import { sendText } from "./send.js";
-import { handleSessionCommand } from "../session/commands.js";
+import { handleSessionCommand, type CronCommandDeps } from "../session/commands.js";
 import { formatCtx, type CompactionDeps } from "../session/compaction.js";
 import type { SessionStore } from "../session/store.js";
 
@@ -64,6 +64,8 @@ export interface MonitorOpts {
   sessionStore: SessionStore;
   /** 上下文压缩依赖（model / apiKey / headers）。 */
   compaction: CompactionDeps;
+  /** /cron 命令依赖（serve 起了调度器才有）；不传则 /cron 回「未开启」。 */
+  cron?: CronCommandDeps;
   abortSignal: AbortSignal;
   log?: (msg: string) => void;
 }
@@ -151,6 +153,7 @@ export async function runMonitor(opts: MonitorOpts): Promise<void> {
           inbound.body,
           agent,
           opts.compaction,
+          opts.cron,
         );
         if (cmdReply !== null) {
           session.messages = agent.state.messages;

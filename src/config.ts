@@ -53,6 +53,24 @@ const ConfigSchema = z.object({
   // 避免无关 skill 污染选择（详见 docs/skill-development.md）。
   globalAgentSkills: z.boolean().optional(),
   extensions: z.array(z.string()).optional(),
+  // 定时任务（Day 8）：到点自己起一轮 agent 干活、把结果推回微信。
+  // 每个任务 = 一句 cron 表达式（at）+ 一段提示词（prompt，驱动 agent，可引导它调 skill）。
+  cron: z
+    .array(
+      z.object({
+        // 任务唯一名（/cron run、opennote run 用它指代；也用作独立会话 key）。
+        name: z.string(),
+        // 5 字段 cron 表达式（分 时 日 月 周），按本地时区匹配。如 "0 21 * * *" = 每天 21:00。
+        at: z.string(),
+        // 驱动 agent 的提示词。里面写清要干嘛即可，命中 skill 会自动走 skill 流程。
+        prompt: z.string(),
+        // 结果推给谁（ilink_user_id）。不填默认推给 allowFrom[0]。
+        to: z.string().optional(),
+        // 是否启用，默认 true。设 false 可临时关掉某条又不删配置。
+        enabled: z.boolean().optional(),
+      }),
+    )
+    .optional(),
   weixin: z
     .object({
       enabled: z.boolean().optional(),
@@ -63,6 +81,19 @@ const ConfigSchema = z.object({
     })
     .optional(),
 });
+
+/** 一条定时任务（Day 8）。 */
+export interface CronTask {
+  name: string;
+  /** 5 字段 cron 表达式（分 时 日 月 周），本地时区。 */
+  at: string;
+  /** 驱动 agent 的提示词。 */
+  prompt: string;
+  /** 结果推给谁（ilink_user_id）；不填默认 allowFrom[0]。 */
+  to?: string;
+  /** 是否启用，默认 true。 */
+  enabled?: boolean;
+}
 
 export interface OpennoteConfig {
   agent: {
@@ -84,6 +115,7 @@ export interface OpennoteConfig {
   skills: string[];
   globalAgentSkills: boolean;
   extensions: string[];
+  cron: CronTask[];
   weixin: {
     enabled: boolean;
     baseUrl?: string;
@@ -137,6 +169,7 @@ export function loadConfig(explicitPath?: string): OpennoteConfig {
     skills: parsed.skills ?? [],
     globalAgentSkills: parsed.globalAgentSkills ?? false,
     extensions: parsed.extensions ?? [],
+    cron: parsed.cron ?? [],
     weixin: {
       enabled: parsed.weixin?.enabled ?? false,
       baseUrl: parsed.weixin?.baseUrl,
