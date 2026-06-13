@@ -40,10 +40,66 @@ export interface MessageItem {
   ref_msg?: RefMessage;
   text_item?: TextItem;
   voice_item?: VoiceItem;
-  /** 媒体类（IMAGE/FILE/VIDEO）MVP 不解析，留作未知。 */
-  image_item?: unknown;
-  file_item?: unknown;
-  video_item?: unknown;
+  /** 媒体类（IMAGE/FILE/VIDEO）：入站不解析，出站发送用下列结构。 */
+  image_item?: ImageItem;
+  file_item?: FileItem;
+  video_item?: VideoItem;
+}
+
+// ---- 媒体发送（出站）：CDN + AES-128-ECB，见 docs/weixin-ilink-integration.md §1.8 ----
+
+/** proto: UploadMediaType（getuploadurl 的 media_type）。 */
+export const UploadMediaType = { IMAGE: 1, VIDEO: 2, FILE: 3, VOICE: 4 } as const;
+
+/** CDN 媒体引用；aes_key 在 JSON 里是 base64 字符串。 */
+export interface CDNMedia {
+  encrypt_query_param?: string;
+  aes_key?: string;
+  /** 0=只加密 fileid，1=打包缩略图/中图等信息。 */
+  encrypt_type?: number;
+  full_url?: string;
+}
+
+export interface ImageItem {
+  media?: CDNMedia;
+  /** 原图密文大小（字节）。 */
+  mid_size?: number;
+}
+
+export interface VideoItem {
+  media?: CDNMedia;
+  /** 视频密文大小（字节）。 */
+  video_size?: number;
+}
+
+export interface FileItem {
+  media?: CDNMedia;
+  file_name?: string;
+  /** 明文字节数（字符串）。 */
+  len?: string;
+}
+
+export interface GetUploadUrlReq {
+  filekey?: string;
+  media_type?: number;
+  to_user_id?: string;
+  /** 明文大小。 */
+  rawsize?: number;
+  /** 明文 MD5（hex）。 */
+  rawfilemd5?: string;
+  /** 密文大小（AES-128-ECB + PKCS7 后）。 */
+  filesize?: number;
+  /** 不需要缩略图上传 URL。 */
+  no_need_thumb?: boolean;
+  /** AES-128 key（hex）。 */
+  aeskey?: string;
+}
+
+export interface GetUploadUrlResp {
+  upload_param?: string;
+  thumb_upload_param?: string;
+  /** 完整上传 URL（服务端直接返回则无需客户端拼接）。 */
+  upload_full_url?: string;
 }
 
 /** proto: WeixinMessage */

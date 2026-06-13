@@ -7,10 +7,19 @@
 
 import crypto from "node:crypto";
 
-import type { BaseInfo, GetUpdatesResp, SendMessageReq } from "./types.js";
+import type {
+  BaseInfo,
+  GetUpdatesResp,
+  GetUploadUrlReq,
+  GetUploadUrlResp,
+  SendMessageReq,
+} from "./types.js";
 
 /** iLink 服务默认地址。 */
 export const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
+
+/** 媒体 CDN 默认地址（仅当 getuploadurl 没回 upload_full_url 时用来拼上传 URL）。 */
+export const DEFAULT_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
 
 /** 长轮询默认超时；普通请求超时。 */
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
@@ -130,4 +139,29 @@ export async function sendMessage(
     timeoutMs: opts.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
     label: "sendMessage",
   });
+}
+
+/** 取媒体上传的预签名 URL（见 docs §1.8）。媒体上传走 CDN，发媒体消息前先调它。 */
+export async function getUploadUrl(
+  opts: WeixinApiOptions & GetUploadUrlReq,
+): Promise<GetUploadUrlResp> {
+  const text = await apiFetch({
+    baseUrl: opts.baseUrl,
+    endpoint: "ilink/bot/getuploadurl",
+    body: JSON.stringify({
+      filekey: opts.filekey,
+      media_type: opts.media_type,
+      to_user_id: opts.to_user_id,
+      rawsize: opts.rawsize,
+      rawfilemd5: opts.rawfilemd5,
+      filesize: opts.filesize,
+      no_need_thumb: opts.no_need_thumb,
+      aeskey: opts.aeskey,
+      base_info: buildBaseInfo(),
+    }),
+    token: opts.token,
+    timeoutMs: opts.timeoutMs ?? DEFAULT_API_TIMEOUT_MS,
+    label: "getUploadUrl",
+  });
+  return JSON.parse(text) as GetUploadUrlResp;
 }
