@@ -19,6 +19,7 @@ import { sendText } from "./send.js";
 import { handleSessionCommand, type CronCommandDeps } from "../session/commands.js";
 import { formatCtx, type CompactionDeps } from "../session/compaction.js";
 import type { SessionStore } from "../session/store.js";
+import type { ClaudeBridge } from "./claude-bridge.js";
 
 const SESSION_EXPIRED_ERRCODE = -14;
 const RETRY_DELAY_MS = 2_000;
@@ -66,6 +67,8 @@ export interface MonitorOpts {
   compaction: CompactionDeps;
   /** /cron 命令依赖（serve 起了调度器才有）；不传则 /cron 回「未开启」。 */
   cron?: CronCommandDeps;
+  /** Claude bridge（可选）：用户发 /claude 切到跟 headless Claude 对话；默认走 opennote agent。 */
+  claudeBridge?: ClaudeBridge;
   abortSignal: AbortSignal;
   log?: (msg: string) => void;
 }
@@ -134,6 +137,26 @@ export async function runMonitor(opts: MonitorOpts): Promise<void> {
         if (!opts.allowFrom.includes(inbound.from)) {
           log(`[weixin] 拒绝非白名单用户 ${inbound.from}`);
           continue;
+        }
+
+        // Claude bridge 优先：用户在 /claude 模式(或发了模式/会话命令)就由它处理，不喂 opennote agent。
+        if (opts.claudeBridge) {
+          const ctx = () => getContextToken(opts.accountId, inbound.from);
+          const onProgress = (msg: string) => {
+            sendText({ baseUrl: opts.baseUrl, token: opts.token, to: inbound.from, text: msg, contextToken: ctx() }).catch(
+              (err) => log(`[weixin] 进度发送失败: ${describeError(err)}`),
+            );
+          };
+          const bridged = await opts.claudeBridge.handle(inbound.from, inbound.body, onProgress);
+          if (bridged !== null) {
+            try {
+              await sendText({ baseUrl: opts.baseUrl, token: opts.token, to: inbound.from, text: bridged, contextToken: ctx() });
+              log(`[weixin] → ${inbound.from}: [claude] ${bridged.slice(0, 40)}`);
+            } catch (err) {
+              log(`[weixin] 回复失败 to=${inbound.from}: ${describeError(err)}`);
+            }
+            continue;
+          }
         }
 
         const agent = opts.resolveAgent(inbound.from);

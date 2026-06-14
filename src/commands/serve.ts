@@ -10,7 +10,8 @@ import { loadConfig } from "../config.js";
 import { SessionStore } from "../session/store.js";
 import type { CompactionDeps } from "../session/compaction.js";
 import { createCronContext } from "../automation/setup.js";
-import { firstAccount } from "../weixin/accounts.js";
+import { resolveLatestBot, type AccountRecord } from "../weixin/accounts.js";
+import { ClaudeBridge } from "../weixin/claude-bridge.js";
 import { DEFAULT_BASE_URL } from "../weixin/ilink.js";
 import { runMonitor } from "../weixin/monitor.js";
 import { createWeixinPush } from "../weixin/push.js";
@@ -28,12 +29,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     return;
   }
 
-  const account = firstAccount();
-  if (!account) {
-    console.error("还没登录微信。先运行 opennote login 扫码。");
-    return;
-  }
-
   // 安全闸：白名单为空 = 谁都不能驱动 agent（这是把 bash/write 暴露给外部输入，必须卡死）。
   if (config.weixin.allowFrom.length === 0) {
     console.error(
@@ -43,8 +38,24 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     return;
   }
 
+  // 按稳定 user_id 解析每个白名单用户【最新登录】的 bot（每次扫码新发 bot_id，自动跟最新）。
+  const bots: AccountRecord[] = [];
+  const seenBot = new Set<string>();
+  for (const user of config.weixin.allowFrom) {
+    const rec = resolveLatestBot(user);
+    if (rec && !seenBot.has(rec.accountId)) {
+      seenBot.add(rec.accountId);
+      bots.push(rec);
+    }
+  }
+  if (bots.length === 0) {
+    console.error("还没登录微信（allowFrom 里的 user 都没扫码过）。先运行 opennote login。");
+    return;
+  }
+
   const agent = createOpennoteAgent(config);
-  const baseUrl = account.baseUrl || config.weixin.baseUrl || DEFAULT_BASE_URL;
+  const primary = bots[0]!;
+  const baseUrl = primary.baseUrl || config.weixin.baseUrl || DEFAULT_BASE_URL;
 
   // 按 from 隔离的会话存储 + 上下文压缩依赖（跟 agent 用同一套 model / key / headers）。
   const sessionStore = new SessionStore();
@@ -63,26 +74,40 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
 
   // 定时任务（Day 8）：用独立 agent 实例，跟消息通道隔离，不互相踩 state.messages。
   // 推送复用持久化的 context_token；任务没配 to 就默认推给白名单第一个人（一般就是你自己）。
-  const push = createWeixinPush(account, baseUrl);
+  const push = createWeixinPush(primary, baseUrl);
   const cron = createCronContext(config, {
     sessionStore,
     push,
     defaultTo: config.weixin.allowFrom[0],
   });
 
-  // 监听循环 + 调度循环并行跑，共用同一个 abortSignal，Ctrl-C 一起停。
+  // /claude 模式：默认消息走上面的 opennote agent；发 /claude 切到 headless Claude。
+  const claudeBridge = new ClaudeBridge({
+    cwd: "/Users/avlin/workspace/25videos/auto-skill",
+    permissionMode: "bypassPermissions",
+  });
+
+  console.log(
+    `[serve] 监听 ${bots.length} 个号(每用户最新)：${bots.map((b) => b.accountId).join(", ")}`,
+  );
+
+  // 每个用户的最新 bot 各跑一个 monitor（共用 agent / 会话存储 / claudeBridge）；
+  // monitor 自带长轮询=顺带保活（取代独立 keepalive）。调度循环只起一次。
   await Promise.all([
-    runMonitor({
-      baseUrl,
-      token: account.botToken,
-      accountId: account.accountId,
-      allowFrom: config.weixin.allowFrom,
-      resolveAgent: singleAgentRouter(agent),
-      sessionStore,
-      compaction,
-      cron: cron.commandDeps,
-      abortSignal: controller.signal,
-    }),
+    ...bots.map((b) =>
+      runMonitor({
+        baseUrl: b.baseUrl || config.weixin.baseUrl || DEFAULT_BASE_URL,
+        token: b.botToken,
+        accountId: b.accountId,
+        allowFrom: config.weixin.allowFrom,
+        resolveAgent: singleAgentRouter(agent),
+        sessionStore,
+        compaction,
+        cron: cron.commandDeps,
+        claudeBridge,
+        abortSignal: controller.signal,
+      }),
+    ),
     cron.startScheduler(controller.signal),
   ]);
 
