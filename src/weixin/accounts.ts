@@ -63,6 +63,30 @@ export function firstAccount(): AccountRecord | undefined {
   return listAccounts()[0];
 }
 
+/**
+ * 按「稳定的 ilink_user_id」取该用户**最新登录**的 bot。
+ * 每次扫码 server 都新发 bot_id（旧号媒体上传会过期），但同一微信用户的 user_id 不变；
+ * 所以按 userId 选最新的账号文件（mtime 最大）即可永远跟到最新号。
+ */
+export function resolveLatestBot(userId: string): AccountRecord | undefined {
+  const dir = weixinDir();
+  if (!fs.existsSync(dir)) return undefined;
+  let best: { rec: AccountRecord; mtime: number } | undefined;
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith(".json") || name.endsWith(".context-tokens.json")) continue;
+    const full = path.join(dir, name);
+    try {
+      const rec = JSON.parse(fs.readFileSync(full, "utf-8")) as AccountRecord;
+      if (rec.userId !== userId) continue;
+      const mtime = fs.statSync(full).mtimeMs;
+      if (!best || mtime > best.mtime) best = { rec, mtime };
+    } catch {
+      // 坏文件忽略
+    }
+  }
+  return best?.rec;
+}
+
 // ---- getUpdates 同步游标（持久化，重启续传）----
 
 function bufPath(accountId: string): string {

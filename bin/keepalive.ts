@@ -16,6 +16,7 @@ import { DEFAULT_BASE_URL, getUpdates } from "../src/weixin/ilink.js";
 import { parseInbound } from "../src/weixin/inbound.js";
 import {
   listAccounts,
+  resolveLatestBot,
   readBuf,
   writeBuf,
   loadContextTokens,
@@ -35,7 +36,11 @@ for (let i = 0; i < argv.length; i++) if (argv[i] === "--account") ids.push(argv
 if (!ids.length) {
   try {
     const r = JSON.parse(fs.readFileSync(flag("--routing", DEFAULT_ROUTING)!, "utf-8"));
-    ids = [r.news, r.tools].filter(Boolean);
+    // routing 里是 user_id；解析成各自最新登录的 bot_id
+    for (const who of [r.news, r.tools].filter(Boolean)) {
+      const bot = resolveLatestBot(who)?.accountId ?? who;
+      ids.push(bot);
+    }
   } catch {
     /* fall through */
   }
