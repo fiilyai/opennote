@@ -107,7 +107,10 @@ export class ClaudeBridge {
     if (t === "/claude") {
       u.mode = "claude";
       this.save();
-      return `🤖 已切到 Claude 模式（会话「${u.active}」，cwd ${this.cur(u).cwd}）。/opennote 切回。`;
+      return (
+        `🤖 已切到 Claude 模式（会话「${u.active}」）。直接说话就交给 Claude；命令：\n` +
+        this.help()
+      );
     }
     if (t === "/opennote" || t === "/exit") {
       const was = u.mode;
@@ -122,7 +125,7 @@ export class ClaudeBridge {
     // ---- 以下都是 Claude 模式 ----
     let m: RegExpMatchArray | null;
     if (t === "/help" || t === "/?") return this.help();
-    if (["/sessions", "/ls", "会话列表"].includes(t)) {
+    if (["/sessions", "/ls", "/list", "会话", "会话列表"].includes(t)) {
       return (
         "Claude 会话：\n" +
         Object.keys(u.sessions).map((n) => `${n === u.active ? "▸" : "  "} ${n}`).join("\n") +
@@ -163,6 +166,11 @@ export class ClaudeBridge {
       u.sessions[u.active] = { id, started: true, cwd: this.cur(u).cwd, createdAt: Date.now() };
       this.save();
       return `🔗 会话「${u.active}」已接到 session ${id}`;
+    }
+
+    // 没识别的单段 /命令 → 回帮助（别把 /list、/switch 这种当 prompt 喂给 Claude）
+    if (t.startsWith("/") && !/\s/.test(t)) {
+      return `没认出命令「${t}」。\n` + this.help();
     }
 
     // 普通消息 → 跑 claude

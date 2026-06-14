@@ -139,6 +139,8 @@ export async function runMonitor(opts: MonitorOpts): Promise<void> {
           continue;
         }
 
+        log(`[weixin] ← ${inbound.from}: ${inbound.body.slice(0, 60)}`);
+
         // Claude bridge 优先：用户在 /claude 模式(或发了模式/会话命令)就由它处理，不喂 opennote agent。
         if (opts.claudeBridge) {
           const ctx = () => getContextToken(opts.accountId, inbound.from);
@@ -165,7 +167,6 @@ export async function runMonitor(opts: MonitorOpts): Promise<void> {
           continue;
         }
 
-        log(`[weixin] ← ${inbound.from}: ${inbound.body.slice(0, 50)}`);
         // 按 from 取会话（接着上次聊）。
         const session = opts.sessionStore.get(inbound.from);
 
